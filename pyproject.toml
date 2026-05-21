@@ -1,0 +1,35 @@
+[project]
+name = "umrah-flight-watch"
+version = "0.1.0"
+description = "Telegram flight-deal channel automation for YYZ to JED Umrah fares."
+requires-python = ">=3.12"
+dependencies = [
+    "alembic>=1.13,<2",
+    "apscheduler>=3.10,<4",
+    "fastapi>=0.115,<1",
+    "flights>=0.8.5,<0.9",
+    "httpx>=0.27,<1",
+    "psycopg[binary]>=3.2,<4",
+    "pydantic-settings>=2.6,<3",
+    "python-telegram-bot>=21,<22",
+    "sqlalchemy>=2.0,<3",
+    "uvicorn[standard]>=0.32,<1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3,<9",
+    "pytest-mock>=3.14,<4",
+    "ruff>=0.8,<1",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
