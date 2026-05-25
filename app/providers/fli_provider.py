@@ -66,7 +66,9 @@ class FliProvider:
             normalized_for_duration: list[NormalizedFlightDeal] = []
             for raw in raw_list:
                 try:
-                    normalized_for_duration.append(self.normalize_result(raw, category=category))
+                    normalized_for_duration.append(
+                        self.normalize_calendar_result(raw, category=category)
+                    )
                 except ValueError as exc:
                     logger.warning("Skipping fli date result that cannot normalize: %s", exc)
             deals.extend(normalized_for_duration)
@@ -126,11 +128,28 @@ class FliProvider:
         deals, _error = self._search_fli_exact_deals(depart_date, return_date, mode, top_n)
         return deals
 
-    def normalize_result(self, raw_result: Any, **kwargs: Any) -> NormalizedFlightDeal:
-        category = kwargs.get("category", "")
-        if hasattr(raw_result, "date") and hasattr(raw_result, "price"):
-            return self._normalize_date_price(raw_result, category=category)
-        return self._normalize_exact_result(raw_result, **kwargs)
+    def normalize_calendar_result(
+        self,
+        raw_result: Any,
+        *,
+        category: str,
+    ) -> NormalizedFlightDeal:
+        return self._normalize_date_price(raw_result, category=category)
+
+    def normalize_exact_result(
+        self,
+        raw_result: Any,
+        *,
+        depart_date: date,
+        return_date: date,
+        category: str = "",
+    ) -> NormalizedFlightDeal:
+        return self._normalize_exact_result(
+            raw_result,
+            depart_date=depart_date,
+            return_date=return_date,
+            category=category,
+        )
 
     def build_google_flights_link(self, depart_date: date, return_date: date) -> str:
         return build_google_flights_link(depart_date, return_date)
@@ -159,7 +178,7 @@ class FliProvider:
         result_limit = max(1, top_n)
         for rank, raw in enumerate(result[:result_limit], start=1):
             try:
-                deal = self.normalize_result(
+                deal = self.normalize_exact_result(
                     raw,
                     depart_date=depart_date,
                     return_date=return_date,

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, datetime
 from enum import StrEnum
 from typing import Any, Protocol
 
@@ -30,6 +30,7 @@ class NormalizedFlightDeal:
     exact_check_completed: bool = False
     deal_score: float | None = None
     market_label: str | None = None
+    last_seen_at: datetime | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def dedupe_key(self) -> tuple[str, str, date, date, int, int]:

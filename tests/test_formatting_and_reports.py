@@ -11,17 +11,13 @@ def make_deal(
     price: int = 890,
     score: float = 8.3,
     minutes: int | None = 26 * 60,
-    last_seen_at: datetime | str | None = None,
+    last_seen_at: datetime | None = None,
 ) -> NormalizedFlightDeal:
     metadata = {
         "deal_type": deal_type,
         "fare_label": "Good",
         "flight_quality_label": "Normal",
     }
-    if isinstance(last_seen_at, datetime):
-        metadata["last_seen_at"] = last_seen_at.isoformat()
-    elif isinstance(last_seen_at, str):
-        metadata["last_seen_at"] = last_seen_at
     return NormalizedFlightDeal(
         category="one_week",
         origin="YYZ",
@@ -37,6 +33,7 @@ def make_deal(
         source="fli",
         exact_check_completed=True,
         deal_score=score,
+        last_seen_at=last_seen_at,
         metadata=metadata,
     )
 
@@ -57,17 +54,21 @@ def test_weekly_report_hides_unknown_fields_and_merges_same_deal() -> None:
         market_label="Good",
         market_score=7.8,
         feedback_form_url="https://forms.example.com",
+        generated_at=datetime(2026, 5, 25, 13, 30, tzinfo=UTC),
     )
 
-    assert "Weekly YYZ &rarr; JED Report" in report
+    assert "\U0001f54b Weekly YYZ &#8594; JED Flight Watch" in report
+    assert "May 25, 2026" in report
     assert "Cheapest + Best Overall:" in report
+    assert "\U0001f4b8\u23f1\ufe0f Cheapest + Best Overall:" in report
     assert "unknown" not in report.lower()
     assert '<a href="https://example.com/search?a=1&amp;b=2">$890 CAD' in report
     assert "fare Good" in report
     assert "flight Normal" in report
-    assert "deal 8.3/10" in report
-    assert "based on 90-day exact-search history" in report
-    assert "Feedback:" in report
+    assert "deal 8.3/10" not in report
+    assert "exact-search history" not in report
+    assert "Feedback:" not in report
+    assert ">Send Feedback</a>" in report
 
 
 def test_weekly_report_does_not_merge_same_dates_with_different_options() -> None:
@@ -85,8 +86,8 @@ def test_weekly_report_does_not_merge_same_dates_with_different_options() -> Non
     )
 
     assert "Cheapest + Best Overall:" not in report
-    assert "Cheapest:" in report
-    assert "Best Overall:" in report
+    assert "\U0001f4b8 Cheapest:" in report
+    assert "\u23f1\ufe0f Best Overall:" in report
     assert "$900 CAD" in report
     assert "$1,020 CAD" in report
     assert "26h" in report
@@ -121,8 +122,8 @@ def test_weekly_report_shows_freshness_in_hours() -> None:
     assert "checked 2h ago" in report
 
 
-def test_weekly_report_ignores_invalid_freshness_timestamp() -> None:
-    deal = make_deal(last_seen_at="not-a-date")
+def test_weekly_report_omits_freshness_when_last_seen_is_missing() -> None:
+    deal = make_deal(last_seen_at=None)
 
     report = build_weekly_report(
         {"one_week": {"cheapest": deal}, "two_week": {}, "one_month": {}},
@@ -148,18 +149,19 @@ def test_weekly_report_uses_fresh_empty_category_copy() -> None:
 def test_weekly_report_handles_unknown_market_score() -> None:
     report = build_weekly_report(
         {"one_week": {}, "two_week": {}, "one_month": {}},
-        market_label="Not enough 90-day exact-search history",
+        market_label="Not enough market data yet",
         market_score=None,
     )
 
-    assert "Market: Not enough 90-day exact-search history" in report
+    assert "Market: Not enough market data yet" in report
     assert "/10" not in report.split("Market:", maxsplit=1)[1]
 
 
 def test_strong_alert_has_button_url_and_escaped_fields() -> None:
     alert = build_strong_alert(make_deal(score=9.2), alert_type="best_value")
 
-    assert "Best Overall YYZ &rarr; JED Deal" in alert.text
+    assert "Best Overall YYZ &#8594; JED Deal" in alert.text
     assert "Saudia &amp; Partners" in alert.text
+    assert "Deal score:" not in alert.text
     assert alert.button_text == "View Deal"
     assert alert.button_url == "https://example.com/search?a=1&b=2"

@@ -58,5 +58,8 @@ class TelegramClient:
 
         url = f"https://api.telegram.org/bot{self.settings.telegram_bot_token}/sendMessage"
         response = httpx.post(url, json=payload, timeout=30.0)
-        response.raise_for_status()
+        if response.is_error:
+            raise RuntimeError(
+                f"Telegram sendMessage failed: HTTP {response.status_code} {response.text}"
+            )
         return response.json().get("result", {}).get("message_id")

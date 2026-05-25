@@ -1,8 +1,8 @@
 # Umrah Flight Watch
 
-Telegram automation for a public YYZ to JED round-trip economy flight-deal channel.
+Private codebase for a public YYZ to JED round-trip economy flight-deal Telegram channel.
 
-Version 1 uses only the open-source `flights` / `fli` package. It does not use SearchAPI, SerpApi, browser automation, cloaked scraping, user accounts, payments, private alerts, or a dashboard.
+Version 1 uses only the open-source `flights` / `fli` package. It does not use SearchAPI, SerpApi, browser automation, cloaked scraping, user accounts, payments, private DMs, or a dashboard.
 
 ## Local Setup
 
@@ -54,9 +54,8 @@ Version 1 uses only the open-source `flights` / `fli` package. It does not use S
   - The three trip categories run in parallel by default.
   - Each category exact-checks the top 10 calendar candidates.
   - Each candidate is checked with `CHEAPEST` and `TOP_FLIGHTS` exact-search modes.
-  - `TOP_FLIGHTS` results feed the report's Best Overall pick when they stay within the price guard.
-  - Best Overall favors lower total travel time while still penalizing expensive fares;
-    stop count remains display-only.
+  - Best Overall is the fastest exact-confirmed result that stays within the price guard.
+  - Stop count remains display-only.
 - Set `DISCOVERY_CATEGORY_WORKERS=1` if the flight provider starts throttling.
 - Reports hide active deals older than `REPORT_MAX_DEAL_AGE_HOURS`.
 - Older deals remain in `price_history`, but are not presented as current report fares.
@@ -67,13 +66,13 @@ Version 1 uses only the open-source `flights` / `fli` package. It does not use S
 - Keep `PRICE_HISTORY_DAYS` at least as large as `MARKET_BASELINE_DAYS`.
 - Exact-search volume is roughly doubled because Cheapest and Best Overall use separate
   provider-ranked exact searches.
-- Strong alerts are price-first:
+- Strong public channel alerts are price-first:
   - With enough 90-day history, a selected exact-confirmed deal alerts at or below
-    `FLASH_ALERT_MEDIAN_RATIO` of the category cheapest-snapshot median.
+    70% of the category cheapest-snapshot median.
   - Without enough 90-day history, alerts are limited to fares at or below
-    `FLASH_ALERT_ABSOLUTE_FALLBACK_CAD`.
+    $750 CAD.
   - Suspicious-price detection is only a safety guard and uses
-    `SUSPICIOUS_PRICE_AVERAGE_RATIO` of the category average.
+    20% of the category average.
 - Friday `13:30` posts the weekly report.
 - `/pause` pauses scheduled scans and channel posting; `/resume` restores them.
 - Manual admin commands remain available while paused.
@@ -86,6 +85,8 @@ The following thresholds are intentionally code-level constants, not environment
 - `MIN_HISTORY_ROWS` (20) in `app/services/market_baseline.py`
 - `EXACT_SEARCH_TOP_N` (3) in `app/jobs/scan_jobs.py`
 - `DEFAULT_BEST_VALUE_*` in `app/services/deal_selection.py`
+- `DEFAULT_FLASH_ALERT_*` in `app/services/deal_selection.py`
+- `DEFAULT_SUSPICIOUS_PRICE_AVERAGE_RATIO` in `app/services/deal_scoring.py`
 
 ## Admin Commands
 

@@ -61,15 +61,20 @@ def test_dedupe_keeps_best_version_of_same_date_pair_and_price() -> None:
     assert deduped == [duplicate_exact]
 
 
-def test_active_deal_selection_returns_cheapest_and_best_value() -> None:
-    cheap_bad = make_deal(price=700, score=7.0, minutes=34 * 60)
-    mid = make_deal(price=820, score=8.1, depart=date(2026, 9, 11), ret=date(2026, 9, 18))
-    best = make_deal(price=940, score=9.2, depart=date(2026, 9, 12), ret=date(2026, 9, 20))
+def test_active_deal_selection_returns_cheapest_and_fastest_within_guard() -> None:
+    cheap_slow = make_deal(price=700, score=7.0, minutes=34 * 60)
+    pricier_fast = make_deal(
+        price=940,
+        score=9.2,
+        depart=date(2026, 9, 12),
+        ret=date(2026, 9, 20),
+        minutes=14 * 60,
+    )
 
-    selected = select_active_deals([cheap_bad, mid, best])
+    selected = select_active_deals([cheap_slow, pricier_fast])
 
-    assert selected["cheapest"] == cheap_bad
-    assert selected["best_value"] == best
+    assert selected["cheapest"] == cheap_slow
+    assert selected["best_value"] == pricier_fast
     assert set(selected) == {"cheapest", "best_value"}
 
 
@@ -100,6 +105,7 @@ def test_active_deal_selection_prefers_top_flights_for_best_value_with_price_gua
         score=8.0,
         exact=True,
         sort_mode="CHEAPEST",
+        minutes=30 * 60,
     )
     top_flight = make_deal(
         price=980,
@@ -108,6 +114,7 @@ def test_active_deal_selection_prefers_top_flights_for_best_value_with_price_gua
         ret=date(2026, 9, 18),
         exact=True,
         sort_mode="TOP_FLIGHTS",
+        minutes=14 * 60,
     )
 
     selected = select_active_deals([cheapest, top_flight])
@@ -143,6 +150,28 @@ def test_active_deal_selection_considers_all_exact_modes_for_best_value() -> Non
 
     assert selected["cheapest"] == cheapest
     assert selected["best_value"] == faster_cheapest_mode
+
+
+def test_active_deal_selection_uses_price_guard_as_the_premium_limit() -> None:
+    cheapest = make_deal(
+        price=900,
+        exact=True,
+        sort_mode="CHEAPEST",
+        minutes=20 * 60,
+    )
+    slightly_faster = make_deal(
+        price=1200,
+        depart=date(2026, 9, 11),
+        ret=date(2026, 9, 18),
+        exact=True,
+        sort_mode="TOP_FLIGHTS",
+        minutes=19 * 60,
+    )
+
+    selected = select_active_deals([cheapest, slightly_faster])
+
+    assert selected["cheapest"] == cheapest
+    assert selected["best_value"] == slightly_faster
 
 
 def test_active_deal_selection_prefers_much_faster_two_week_trip_after_scoring() -> None:

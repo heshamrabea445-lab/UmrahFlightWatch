@@ -50,7 +50,6 @@ class ReportJobService:
                     active,
                     market_label=market.label,
                     market_score=market.score,
-                    market_baseline_days=self.settings.market_baseline_days,
                     feedback_form_url=self.settings.feedback_form_url,
                     generated_at=now,
                 )
@@ -85,7 +84,6 @@ class ReportJobService:
                 active,
                 market_label=market.label,
                 market_score=market.score,
-                market_baseline_days=self.settings.market_baseline_days,
                 feedback_form_url=self.settings.feedback_form_url,
                 generated_at=now,
             )
@@ -161,5 +159,6 @@ def _deal_from_active(row: ActiveDeal) -> NormalizedFlightDeal:
         exact_check_completed=row.exact_check_completed,
         deal_score=row.deal_score,
         market_label=row.market_label,
-        metadata={**(row.metadata_json or {}), "last_seen_at": row.last_seen_at.isoformat()},
+        last_seen_at=row.last_seen_at,
+        metadata=row.metadata_json or {},
     )

@@ -146,7 +146,7 @@ def test_current_report_market_uses_90_day_history_snapshots() -> None:
     report = service.build_current_report_text()
 
     assert "Market: Good buying window -- 8.5/10" in report
-    assert "based on 90-day exact-search history" in report
+    assert "exact-search history" not in report
 
 
 def test_current_report_market_honors_insufficient_history() -> None:
@@ -182,4 +182,4 @@ def test_current_report_market_honors_insufficient_history() -> None:
 
     report = service.build_current_report_text()
 
-    assert "Market: Not enough 90-day exact-search history" in report
+    assert "Market: Not enough market data yet" in report

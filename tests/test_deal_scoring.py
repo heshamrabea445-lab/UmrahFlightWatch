@@ -274,5 +274,5 @@ def test_market_rating_requires_enough_history() -> None:
         min_history_rows=MIN_HISTORY_ROWS,
     )
 
-    assert rating.label == "Not enough 90-day exact-search history"
+    assert rating.label == "Not enough market data yet"
     assert rating.score is None

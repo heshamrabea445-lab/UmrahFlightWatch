@@ -487,9 +487,6 @@ class FlightScanService:
                 deal,
                 recent_average,
                 active.last_posted_price_cad,
-                flash_alert_median_ratio=self.settings.flash_alert_median_ratio,
-                flash_alert_absolute_fallback_cad=self.settings.flash_alert_absolute_fallback_cad,
-                suspicious_price_average_ratio=self.settings.suspicious_price_average_ratio,
             ):
                 continue
             alert = build_strong_alert(deal, alert_type=deal_type)

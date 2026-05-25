@@ -26,12 +26,15 @@ def build_weekly_report(
     *,
     market_label: str,
     market_score: float | None,
-    market_baseline_days: int = 90,
     feedback_form_url: str = "",
     generated_at: datetime | None = None,
 ) -> str:
     report_time = generated_at or utc_now()
-    lines = ["Weekly YYZ &rarr; JED Report", ""]
+    lines = [
+        "\U0001f54b Weekly YYZ &#8594; JED Flight Watch",
+        _report_date(report_time),
+        "",
+    ]
     for category in ordered_categories():
         lines.append(CATEGORY_LABELS[category])
         category_deals = active_deals.get(category, {})
@@ -49,27 +52,26 @@ def build_weekly_report(
         lines.append("")
 
     if market_score is None:
-        lines.append(f"Market: {escape_telegram_html(market_label)}")
+        lines.append(f"\U0001f4ca Market: {escape_telegram_html(market_label)}")
     else:
         lines.append(
-            f"Market: {escape_telegram_html(market_label)} -- {market_score:.1f}/10, "
-            f"based on {market_baseline_days}-day exact-search history"
+            f"\U0001f4ca Market: {escape_telegram_html(market_label)} -- {market_score:.1f}/10"
         )
     lines.append("")
     lines.append(
-        "Note: Prices can change. Always verify the final price, baggage, "
+        "\u26a0\ufe0f Prices can change. Always verify the final price, baggage, "
         "and layovers before booking."
     )
     if feedback_form_url:
-        lines.append(f"Feedback: {html_link(feedback_form_url, 'Send a fare tip')}")
+        lines.append(html_link(feedback_form_url, "Send Feedback"))
     return "\n".join(lines).strip()
 
 
 def build_strong_alert(deal: NormalizedFlightDeal, alert_type: str) -> AlertMessage:
     title = (
-        "\U0001f6a8 Ultra-Cheap YYZ &rarr; JED Deal"
+        "\U0001f6a8 Ultra-Cheap YYZ &#8594; JED Deal"
         if alert_type == "cheapest"
-        else "\U0001f525 Best Overall YYZ &rarr; JED Deal"
+        else "\U0001f525 Best Overall YYZ &#8594; JED Deal"
     )
     lines = [title, ""]
     lines.append(f"Price/Dates: {_price_date_link(deal)}")
@@ -79,8 +81,6 @@ def build_strong_alert(deal: NormalizedFlightDeal, alert_type: str) -> AlertMess
     _append_optional(lines, "Total travel time", format_minutes(deal.total_travel_minutes))
     _append_optional(lines, "Layover", deal.layover_summary)
     _append_optional(lines, "Baggage", deal.baggage_summary)
-    if deal.deal_score is not None:
-        lines.append(f"Deal score: {deal.deal_score:.1f}/10")
     return AlertMessage(
         text="\n".join(lines),
         button_text="View Deal",
@@ -89,8 +89,9 @@ def build_strong_alert(deal: NormalizedFlightDeal, alert_type: str) -> AlertMess
 
 
 def _deal_line(label: str, deal: NormalizedFlightDeal, *, generated_at: datetime) -> str:
+    display_label = _deal_label(label)
     parts = [
-        f"{label}: {_price_date_link(deal)}",
+        f"{display_label}: {_price_date_link(deal)}",
         f"{deal.trip_length_days} days",
     ]
     stops = _format_stops(deal.stops)
@@ -111,22 +112,30 @@ def _deal_line(label: str, deal: NormalizedFlightDeal, *, generated_at: datetime
     flight_quality_label = _metadata_label(deal, "flight_quality_label")
     if flight_quality_label:
         parts.append(f"flight {flight_quality_label}")
-    if deal.deal_score is not None:
-        parts.append(f"deal {deal.deal_score:.1f}/10")
     freshness = _freshness_label(deal, generated_at=generated_at)
     if freshness:
         parts.append(freshness)
     return " -- ".join(parts)
 
 
+def _deal_label(label: str) -> str:
+    if label == "Cheapest":
+        return "\U0001f4b8 Cheapest"
+    if label == "Best Overall":
+        return "\u23f1\ufe0f Best Overall"
+    if label == "Cheapest + Best Overall":
+        return "\U0001f4b8\u23f1\ufe0f Cheapest + Best Overall"
+    return label
+
+
+def _report_date(value: datetime) -> str:
+    return f"{value.strftime('%B')} {value.day}, {value.year}"
+
+
 def _freshness_label(deal: NormalizedFlightDeal, *, generated_at: datetime) -> str | None:
-    raw_last_seen = deal.metadata.get("last_seen_at")
-    if not isinstance(raw_last_seen, str):
+    if deal.last_seen_at is None:
         return None
-    try:
-        last_seen = datetime.fromisoformat(raw_last_seen)
-    except ValueError:
-        return None
+    last_seen = deal.last_seen_at
     if last_seen.tzinfo is None:
         last_seen = last_seen.replace(tzinfo=UTC)
     report_time = generated_at

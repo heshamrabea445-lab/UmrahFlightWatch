@@ -15,7 +15,7 @@ def test_fli_date_price_normalization_handles_calendar_result() -> None:
         currency="CAD",
     )
 
-    deal = provider.normalize_result(raw, category="one_week")
+    deal = provider.normalize_calendar_result(raw, category="one_week")
 
     assert deal.origin == "YYZ"
     assert deal.destination == "JED"
@@ -43,7 +43,7 @@ def test_fli_exact_result_normalization_uses_available_fields_without_crashing()
         primary_airline_name="Saudia",
     )
 
-    deal = provider.normalize_result(
+    deal = provider.normalize_exact_result(
         raw,
         category="two_week",
         depart_date=datetime(2026, 9, 12).date(),

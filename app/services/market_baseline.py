@@ -114,7 +114,7 @@ def calculate_market_rating(
 
     if not category_scores:
         return MarketRating(
-            label="Not enough 90-day exact-search history",
+            label="Not enough market data yet",
             score=None,
             metadata={
                 "baseline_days": baseline_days,
