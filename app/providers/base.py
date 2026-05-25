@@ -59,7 +59,6 @@ class ProviderSearchResponse:
     request_count: int = 0
     successful_count: int = 0
     failed_count: int = 0
-    error_messages: list[str] = field(default_factory=list)
 
 
 class FlightProvider(Protocol):
@@ -70,8 +69,7 @@ class FlightProvider(Protocol):
         category: str,
         start_date: date,
         end_date: date,
-    ) -> ProviderSearchResponse:
-        raise NotImplementedError
+    ) -> ProviderSearchResponse: ...
 
     def search_exact_round_trip(
         self,
@@ -80,11 +78,4 @@ class FlightProvider(Protocol):
         *,
         mode: ExactSearchMode = ExactSearchMode.CHEAPEST,
         top_n: int = 1,
-    ) -> list[NormalizedFlightDeal]:
-        raise NotImplementedError
-
-    def normalize_result(self, raw_result: Any, **kwargs: Any) -> NormalizedFlightDeal:
-        raise NotImplementedError
-
-    def build_google_flights_link(self, depart_date: date, return_date: date) -> str:
-        raise NotImplementedError
+    ) -> list[NormalizedFlightDeal]: ...

@@ -161,24 +161,3 @@ def _deal_from_active(row: ActiveDeal) -> NormalizedFlightDeal:
         market_label=row.market_label,
         metadata={**(row.metadata_json or {}), "last_seen_at": row.last_seen_at.isoformat()},
     )
-
-
-def _deal_from_price_history(row: PriceHistory) -> NormalizedFlightDeal:
-    return NormalizedFlightDeal(
-        category=row.category,
-        origin=row.origin,
-        destination=row.destination,
-        depart_date=row.depart_date,
-        return_date=row.return_date,
-        trip_length_days=row.trip_length_days,
-        price_cad=row.price_cad,
-        airline=row.airline,
-        stops=row.stops,
-        total_travel_minutes=row.total_travel_minutes,
-        layover_summary=row.layover_summary,
-        baggage_summary=row.baggage_summary,
-        source=row.source,
-        exact_check_completed=row.exact_check_completed,
-        deal_score=row.deal_score,
-        metadata=row.metadata_json or {},
-    )

@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from datetime import date, timedelta
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.config import Settings
@@ -54,7 +54,7 @@ class FlightScanService:
         *,
         session_factory: Any,
         provider: FlightProvider,
-        telegram_client: TelegramClient | Any,
+        telegram_client: TelegramClient,
         dry_run: bool,
         settings: Settings | None = None,
     ) -> None:
@@ -515,18 +515,6 @@ class FlightScanService:
             if active:
                 active.last_posted_at = posted_at
                 active.last_posted_price_cad = deal.price_cad
-
-    def _recent_category_average(self, session: Session, category: str) -> float | None:
-        since = utc_now() - timedelta(days=self.settings.price_history_days)
-        average = session.execute(
-            select(func.avg(PriceHistory.price_cad)).where(
-                PriceHistory.category == category,
-                PriceHistory.exact_check_completed.is_(True),
-                PriceHistory.checked_at >= since,
-                PriceHistory.archived_at.is_(None),
-            )
-        ).scalar()
-        return float(average) if average is not None else None
 
     def _category_fare_baseline(
         self,

@@ -1,5 +1,4 @@
 from datetime import UTC, date, datetime, timedelta
-from decimal import Decimal
 from pathlib import Path
 from threading import Lock
 
@@ -66,12 +65,6 @@ class FakeProvider:
                 metadata={"exact_sort_mode": mode.value, "exact_rank": 1},
             )
         ]
-
-    def normalize_result(self, raw_result, **kwargs):  # pragma: no cover - protocol shim
-        raise NotImplementedError
-
-    def build_google_flights_link(self, depart_date: date, return_date: date) -> str:
-        return "https://example.com"
 
 
 class ExactPriceProvider(FakeProvider):
@@ -211,16 +204,6 @@ class FakeTelegramClient:
         return None
 
 
-class FakeAverageResult:
-    def scalar(self) -> Decimal:
-        return Decimal("1234.56")
-
-
-class FakeAverageSession:
-    def execute(self, statement):  # noqa: ANN001 - test double only needs the execute protocol.
-        return FakeAverageResult()
-
-
 def make_calendar_deal(
     price: int,
     depart_day: int,
@@ -288,12 +271,6 @@ class ManyDealProvider:
                 metadata={"exact_sort_mode": mode.value, "exact_rank": 1},
             )
         ]
-
-    def normalize_result(self, raw_result, **kwargs):  # pragma: no cover - protocol shim
-        raise NotImplementedError
-
-    def build_google_flights_link(self, depart_date: date, return_date: date) -> str:
-        return "https://example.com"
 
 
 class FailingCategoryProvider(ManyDealProvider):
@@ -639,17 +616,3 @@ def test_scan_all_categories_raises_after_other_categories_finish(tmp_path: Path
         assert scans["one_month"].status == "success"
         assert session.query(PriceHistory).count() == 40
         assert session.query(ActiveDeal).filter_by(active=True).count() == 6
-
-
-def test_recent_category_average_converts_database_numeric_to_float() -> None:
-    service = FlightScanService(
-        session_factory=lambda: None,
-        provider=FakeProvider(),
-        telegram_client=FakeTelegramClient(),
-        dry_run=True,
-    )
-
-    average = service._recent_category_average(FakeAverageSession(), "one_week")
-
-    assert average == 1234.56
-    assert isinstance(average, float)

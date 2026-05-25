@@ -59,19 +59,19 @@ class TelegramAdminBot:
         await self.application.stop()
         await self.application.shutdown()
 
-    async def status(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    async def status(self, update: Update, _context: ContextTypes.DEFAULT_TYPE) -> None:
         if not await self._ensure_admin(update):
             return
         text = await asyncio.to_thread(self._status_text)
         await update.effective_message.reply_text(text)
 
-    async def usage(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    async def usage(self, update: Update, _context: ContextTypes.DEFAULT_TYPE) -> None:
         if not await self._ensure_admin(update):
             return
         text = await asyncio.to_thread(self._usage_text)
         await update.effective_message.reply_text(text)
 
-    async def pause(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    async def pause(self, update: Update, _context: ContextTypes.DEFAULT_TYPE) -> None:
         if not await self._ensure_admin(update):
             return
         with self.session_factory() as session:
@@ -79,7 +79,7 @@ class TelegramAdminBot:
             session.commit()
         await update.effective_message.reply_text("Paused scheduled scans and channel posting.")
 
-    async def resume(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    async def resume(self, update: Update, _context: ContextTypes.DEFAULT_TYPE) -> None:
         if not await self._ensure_admin(update):
             return
         with self.session_factory() as session:
@@ -103,19 +103,19 @@ class TelegramAdminBot:
             await asyncio.to_thread(self.scan_service.scan_category, category, respect_pause=False)
         await update.effective_message.reply_text(f"Manual scan finished: {category}")
 
-    async def post_report(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    async def post_report(self, update: Update, _context: ContextTypes.DEFAULT_TYPE) -> None:
         if not await self._ensure_admin(update):
             return
         await asyncio.to_thread(self.report_service.post_weekly_report, respect_pause=False)
         await update.effective_message.reply_text("Weekly report generated.")
 
-    async def last_deals(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    async def last_deals(self, update: Update, _context: ContextTypes.DEFAULT_TYPE) -> None:
         if not await self._ensure_admin(update):
             return
         text = await asyncio.to_thread(self._last_deals_text)
         await update.effective_message.reply_text(text)
 
-    async def provider(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    async def provider(self, update: Update, _context: ContextTypes.DEFAULT_TYPE) -> None:
         if not await self._ensure_admin(update):
             return
         text = await asyncio.to_thread(self._provider_text)

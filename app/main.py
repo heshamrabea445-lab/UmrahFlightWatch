@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from app.admin.telegram_admin import TelegramAdminBot
-from app.config import Settings, get_settings
+from app.config import get_settings
 from app.db.session import create_session_factory
 from app.jobs.cleanup_jobs import CleanupJobService
 from app.jobs.report_jobs import ReportJobService
@@ -66,10 +66,7 @@ def create_app() -> FastAPI:
 
     @app.get("/health")
     def health() -> dict[str, str]:
-        settings: Settings = (
-            app.state.settings if hasattr(app.state, "settings") else get_settings()
-        )
-        return {"status": "ok", "provider": settings.provider_source}
+        return {"status": "ok", "provider": "fli"}
 
     @app.get("/")
     def root() -> dict[str, str]:

@@ -5,7 +5,6 @@ from types import SimpleNamespace
 from app.providers.base import NormalizedFlightDeal
 from app.services.deal_scoring import (
     apply_deal_ratings,
-    calculate_deal_score,
     calculate_flight_quality_score,
     is_suspicious_price,
     score_label,
@@ -43,6 +42,21 @@ def make_deal(
     )
 
 
+def rated_deal_score(
+    deal: NormalizedFlightDeal,
+    *,
+    recent_category_average: float | None,
+) -> float:
+    apply_deal_ratings(
+        deal,
+        fare_baseline=None,
+        recent_category_average=recent_category_average,
+        min_history_rows=20,
+    )
+    assert deal.deal_score is not None
+    return deal.deal_score
+
+
 def test_suspicious_price_detection_uses_category_average_ratio_only() -> None:
     assert not is_suspicious_price(make_deal(499), recent_category_average=1200)
     assert not is_suspicious_price(make_deal(475), recent_category_average=None)
@@ -55,8 +69,8 @@ def test_suspicious_price_detection_accepts_decimal_average() -> None:
 
 
 def test_deal_score_rewards_prices_below_recent_average() -> None:
-    cheap = calculate_deal_score(make_deal(850), recent_category_average=1200)
-    expensive = calculate_deal_score(make_deal(1450), recent_category_average=1200)
+    cheap = rated_deal_score(make_deal(850), recent_category_average=1200)
+    expensive = rated_deal_score(make_deal(1450), recent_category_average=1200)
 
     assert cheap > expensive
     assert 0 <= expensive <= 10
@@ -64,11 +78,11 @@ def test_deal_score_rewards_prices_below_recent_average() -> None:
 
 
 def test_deal_score_prefers_much_shorter_trip_when_price_is_reasonable() -> None:
-    cheap_slow = calculate_deal_score(
+    cheap_slow = rated_deal_score(
         make_deal(800, minutes=24 * 60),
         recent_category_average=1200,
     )
-    faster_reasonable = calculate_deal_score(
+    faster_reasonable = rated_deal_score(
         make_deal(1100, minutes=14 * 60),
         recent_category_average=1200,
     )

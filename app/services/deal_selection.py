@@ -21,16 +21,6 @@ def dedupe_deals(deals: list[NormalizedFlightDeal]) -> list[NormalizedFlightDeal
     return list(selected.values())
 
 
-def is_extreme_bad_flight(deal: NormalizedFlightDeal) -> bool:
-    if deal.total_travel_minutes is not None and deal.total_travel_minutes > 32 * 60:
-        return True
-    if deal.stops is not None and deal.stops > 2:
-        return True
-    if deal.layover_summary and "airport change" in deal.layover_summary.lower():
-        return True
-    return bool(deal.layover_summary and "unusable" in deal.layover_summary.lower())
-
-
 def select_active_deals(
     deals: list[NormalizedFlightDeal],
     *,

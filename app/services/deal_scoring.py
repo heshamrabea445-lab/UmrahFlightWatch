@@ -43,24 +43,6 @@ def is_suspicious_price(
     return bool(average and deal.price_cad < average * average_ratio)
 
 
-def calculate_deal_score(
-    deal: NormalizedFlightDeal,
-    recent_category_average: SupportsFloat | None,
-    *,
-    fare_baseline: PriceBaseline | None = None,
-    min_history_rows: int = 20,
-) -> float:
-    fare_score, _fare_label, _fallback = calculate_fare_score(
-        deal.price_cad,
-        recent_category_average,
-        fare_baseline=fare_baseline,
-        min_history_rows=min_history_rows,
-    )
-    flight_quality_score = calculate_flight_quality_score(deal)
-    confidence_score = calculate_confidence_score(deal)
-    return _combined_deal_score(fare_score, flight_quality_score, confidence_score)
-
-
 def apply_deal_ratings(
     deal: NormalizedFlightDeal,
     *,
@@ -106,7 +88,7 @@ def calculate_fare_score(
     min_history_rows: int = 20,
 ) -> tuple[float, str, bool]:
     if fare_baseline and fare_baseline.has_enough_history(min_history_rows):
-        score = _baseline_price_score(price_cad, fare_baseline)
+        score = median_ratio_score_for_price(price_cad, fare_baseline)
         return score, score_label(score), False
     score = _price_score(price_cad, recent_category_average)
     return score, score_label(score), True
@@ -185,10 +167,6 @@ def _price_score(price_cad: int, recent_average: SupportsFloat | None) -> float:
     if price_cad <= 1600:
         return 4.0
     return 2.5
-
-
-def _baseline_price_score(price_cad: int, baseline: PriceBaseline) -> float:
-    return median_ratio_score_for_price(price_cad, baseline)
 
 
 def _coerce_average(recent_average: SupportsFloat | None) -> float | None:

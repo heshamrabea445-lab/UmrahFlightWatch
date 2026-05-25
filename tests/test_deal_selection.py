@@ -4,7 +4,6 @@ from app.providers.base import NormalizedFlightDeal
 from app.services.deal_scoring import apply_deal_ratings
 from app.services.deal_selection import (
     dedupe_deals,
-    is_extreme_bad_flight,
     qualifies_for_strong_alert,
     select_active_deals,
 )
@@ -63,13 +62,6 @@ def test_dedupe_keeps_best_version_of_same_date_pair_and_price() -> None:
     deduped = dedupe_deals([duplicate_plain, duplicate_exact])
 
     assert deduped == [duplicate_exact]
-
-
-def test_extreme_bad_flight_filter_uses_available_fields_only() -> None:
-    assert is_extreme_bad_flight(make_deal(minutes=33 * 60))
-    assert is_extreme_bad_flight(make_deal(stops=3))
-    assert is_extreme_bad_flight(make_deal(layover="Airport change in New York"))
-    assert not is_extreme_bad_flight(make_deal(stops=None, minutes=None, layover=None))
 
 
 def test_active_deal_selection_uses_cheapest_best_value_and_backup() -> None:

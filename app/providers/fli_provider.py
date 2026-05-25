@@ -33,7 +33,6 @@ class FliProvider:
         request_count = 0
         successful_count = 0
         failed_count = 0
-        errors: list[str] = []
 
         for index, duration in enumerate(category_durations(category)):
             if index > 0 and self.settings.fli_request_delay_seconds > 0:
@@ -51,7 +50,6 @@ class FliProvider:
             request_count += attempts
             if error:
                 failed_count += 1
-                errors.append(f"duration={duration}: {error}")
                 logger.error(
                     "fli search_dates failed category=%s duration=%s start_date=%s "
                     "end_date=%s duration_seconds=%s error=%s",
@@ -116,7 +114,6 @@ class FliProvider:
             request_count=request_count,
             successful_count=successful_count,
             failed_count=failed_count,
-            error_messages=errors,
         )
 
     def search_exact_round_trip(
