@@ -9,7 +9,10 @@ from app.config import Settings, get_settings
 def create_db_engine(database_url: str) -> Engine:
     if not database_url:
         raise RuntimeError("DATABASE_URL is required")
-    return create_engine(database_url, pool_pre_ping=True)
+    connect_args = {}
+    if database_url.startswith("postgresql+psycopg"):
+        connect_args["prepare_threshold"] = None
+    return create_engine(database_url, pool_pre_ping=True, connect_args=connect_args)
 
 
 def create_session_factory(database_url: str) -> sessionmaker[Session]:

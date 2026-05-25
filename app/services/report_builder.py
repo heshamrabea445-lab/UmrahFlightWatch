@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import UTC, datetime
 
 from app.providers.base import NormalizedFlightDeal
-from app.utils.dates import CATEGORY_LABELS, ordered_categories
+from app.utils.dates import CATEGORY_LABELS, ordered_categories, utc_now
 from app.utils.formatting import (
     escape_telegram_html,
     format_currency_cad,
@@ -24,27 +25,36 @@ def build_weekly_report(
     active_deals: dict[str, dict[str, NormalizedFlightDeal]],
     *,
     market_label: str,
-    market_score: float,
+    market_score: float | None,
+    market_baseline_days: int = 90,
     feedback_form_url: str = "",
+    generated_at: datetime | None = None,
 ) -> str:
+    report_time = generated_at or utc_now()
     lines = ["Weekly YYZ &rarr; JED Report", ""]
     for category in ordered_categories():
         lines.append(CATEGORY_LABELS[category])
         category_deals = active_deals.get(category, {})
         cheapest = category_deals.get("cheapest")
         best_value = category_deals.get("best_value")
-        if cheapest and best_value and cheapest.date_pair_key() == best_value.date_pair_key():
-            lines.append(_deal_line("Cheapest + Best Value", cheapest))
+        if cheapest and best_value and _same_report_option(cheapest, best_value):
+            lines.append(_deal_line("Cheapest + Best Overall", cheapest, generated_at=report_time))
         else:
             if cheapest:
-                lines.append(_deal_line("Cheapest", cheapest))
+                lines.append(_deal_line("Cheapest", cheapest, generated_at=report_time))
             if best_value:
-                lines.append(_deal_line("Best Value", best_value))
+                lines.append(_deal_line("Best Overall", best_value, generated_at=report_time))
         if not cheapest and not best_value:
-            lines.append("No current deals.")
+            lines.append("No fresh exact-confirmed deal found.")
         lines.append("")
 
-    lines.append(f"Market: {escape_telegram_html(market_label)} -- {market_score:.1f}/10")
+    if market_score is None:
+        lines.append(f"Market: {escape_telegram_html(market_label)}")
+    else:
+        lines.append(
+            f"Market: {escape_telegram_html(market_label)} -- {market_score:.1f}/10, "
+            f"based on {market_baseline_days}-day exact-search history"
+        )
     lines.append("")
     lines.append(
         "Note: Prices can change. Always verify the final price, baggage, "
@@ -59,7 +69,7 @@ def build_strong_alert(deal: NormalizedFlightDeal, alert_type: str) -> AlertMess
     title = (
         "\U0001f6a8 Ultra-Cheap YYZ &rarr; JED Deal"
         if alert_type == "cheapest"
-        else "\U0001f525 Best-Value YYZ &rarr; JED Deal"
+        else "\U0001f525 Best Overall YYZ &rarr; JED Deal"
     )
     lines = [title, ""]
     lines.append(f"Price/Dates: {_price_date_link(deal)}")
@@ -78,7 +88,7 @@ def build_strong_alert(deal: NormalizedFlightDeal, alert_type: str) -> AlertMess
     )
 
 
-def _deal_line(label: str, deal: NormalizedFlightDeal) -> str:
+def _deal_line(label: str, deal: NormalizedFlightDeal, *, generated_at: datetime) -> str:
     parts = [
         f"{label}: {_price_date_link(deal)}",
         f"{deal.trip_length_days} days",
@@ -95,9 +105,54 @@ def _deal_line(label: str, deal: NormalizedFlightDeal) -> str:
         parts.append(escape_telegram_html(deal.layover_summary))
     if deal.baggage_summary:
         parts.append(escape_telegram_html(deal.baggage_summary))
+    fare_label = _metadata_label(deal, "fare_label")
+    if fare_label:
+        parts.append(f"fare {fare_label}")
+    flight_quality_label = _metadata_label(deal, "flight_quality_label")
+    if flight_quality_label:
+        parts.append(f"flight {flight_quality_label}")
     if deal.deal_score is not None:
-        parts.append(f"{deal.deal_score:.1f}/10")
+        parts.append(f"deal {deal.deal_score:.1f}/10")
+    freshness = _freshness_label(deal, generated_at=generated_at)
+    if freshness:
+        parts.append(freshness)
     return " -- ".join(parts)
+
+
+def _freshness_label(deal: NormalizedFlightDeal, *, generated_at: datetime) -> str | None:
+    raw_last_seen = deal.metadata.get("last_seen_at")
+    if not isinstance(raw_last_seen, str):
+        return None
+    try:
+        last_seen = datetime.fromisoformat(raw_last_seen)
+    except ValueError:
+        return None
+    if last_seen.tzinfo is None:
+        last_seen = last_seen.replace(tzinfo=UTC)
+    report_time = generated_at
+    if report_time.tzinfo is None:
+        report_time = report_time.replace(tzinfo=UTC)
+    minutes = max(0, int((report_time - last_seen).total_seconds() // 60))
+    if minutes < 60:
+        return f"checked {minutes} min ago"
+    return f"checked {minutes // 60}h ago"
+
+
+def _same_report_option(first: NormalizedFlightDeal, second: NormalizedFlightDeal) -> bool:
+    return (
+        first.date_pair_key() == second.date_pair_key()
+        and first.price_cad == second.price_cad
+        and first.airline == second.airline
+        and first.stops == second.stops
+        and first.total_travel_minutes == second.total_travel_minutes
+        and first.layover_summary == second.layover_summary
+        and first.baggage_summary == second.baggage_summary
+    )
+
+
+def _metadata_label(deal: NormalizedFlightDeal, key: str) -> str | None:
+    value = deal.metadata.get(key)
+    return escape_telegram_html(str(value)) if value else None
 
 
 def _price_date_link(deal: NormalizedFlightDeal) -> str:

@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import UTC, date, datetime, timedelta
 
 from app.providers.base import NormalizedFlightDeal
 from app.services.report_builder import build_strong_alert, build_weekly_report
@@ -10,7 +10,18 @@ def make_deal(
     deal_type: str = "cheapest",
     price: int = 890,
     score: float = 8.3,
+    minutes: int | None = 26 * 60,
+    last_seen_at: datetime | str | None = None,
 ) -> NormalizedFlightDeal:
+    metadata = {
+        "deal_type": deal_type,
+        "fare_label": "Good",
+        "flight_quality_label": "Normal",
+    }
+    if isinstance(last_seen_at, datetime):
+        metadata["last_seen_at"] = last_seen_at.isoformat()
+    elif isinstance(last_seen_at, str):
+        metadata["last_seen_at"] = last_seen_at
     return NormalizedFlightDeal(
         category="one_week",
         origin="YYZ",
@@ -21,12 +32,12 @@ def make_deal(
         price_cad=price,
         airline="Saudia & Partners",
         stops=2,
-        total_travel_minutes=26 * 60,
+        total_travel_minutes=minutes,
         google_flights_link="https://example.com/search?a=1&b=2",
         source="fli",
         exact_check_completed=True,
         deal_score=score,
-        metadata={"deal_type": deal_type},
+        metadata=metadata,
     )
 
 
@@ -49,16 +60,106 @@ def test_weekly_report_hides_unknown_fields_and_merges_same_deal() -> None:
     )
 
     assert "Weekly YYZ &rarr; JED Report" in report
-    assert "Cheapest + Best Value:" in report
+    assert "Cheapest + Best Overall:" in report
     assert "unknown" not in report.lower()
     assert '<a href="https://example.com/search?a=1&amp;b=2">$890 CAD' in report
+    assert "fare Good" in report
+    assert "flight Normal" in report
+    assert "deal 8.3/10" in report
+    assert "based on 90-day exact-search history" in report
     assert "Feedback:" in report
+
+
+def test_weekly_report_does_not_merge_same_dates_with_different_options() -> None:
+    cheapest = make_deal(price=900, minutes=26 * 60)
+    faster_best = make_deal(deal_type="best_value", price=1020, score=9.1, minutes=16 * 60)
+
+    report = build_weekly_report(
+        {
+            "one_week": {"cheapest": cheapest, "best_value": faster_best},
+            "two_week": {},
+            "one_month": {},
+        },
+        market_label="Good",
+        market_score=7.8,
+    )
+
+    assert "Cheapest + Best Overall:" not in report
+    assert "Cheapest:" in report
+    assert "Best Overall:" in report
+    assert "$900 CAD" in report
+    assert "$1,020 CAD" in report
+    assert "26h" in report
+    assert "16h" in report
+
+
+def test_weekly_report_shows_freshness_in_minutes() -> None:
+    generated_at = datetime(2026, 5, 23, 20, 0, tzinfo=UTC)
+    deal = make_deal(last_seen_at=generated_at - timedelta(minutes=38))
+
+    report = build_weekly_report(
+        {"one_week": {"cheapest": deal}, "two_week": {}, "one_month": {}},
+        market_label="Good",
+        market_score=7.8,
+        generated_at=generated_at,
+    )
+
+    assert "checked 38 min ago" in report
+
+
+def test_weekly_report_shows_freshness_in_hours() -> None:
+    generated_at = datetime(2026, 5, 23, 20, 0, tzinfo=UTC)
+    deal = make_deal(last_seen_at=generated_at - timedelta(hours=2, minutes=15))
+
+    report = build_weekly_report(
+        {"one_week": {"cheapest": deal}, "two_week": {}, "one_month": {}},
+        market_label="Good",
+        market_score=7.8,
+        generated_at=generated_at,
+    )
+
+    assert "checked 2h ago" in report
+
+
+def test_weekly_report_ignores_invalid_freshness_timestamp() -> None:
+    deal = make_deal(last_seen_at="not-a-date")
+
+    report = build_weekly_report(
+        {"one_week": {"cheapest": deal}, "two_week": {}, "one_month": {}},
+        market_label="Good",
+        market_score=7.8,
+        generated_at=datetime(2026, 5, 23, 20, 0, tzinfo=UTC),
+    )
+
+    assert "checked" not in report
+
+
+def test_weekly_report_uses_fresh_empty_category_copy() -> None:
+    report = build_weekly_report(
+        {"one_week": {}, "two_week": {}, "one_month": {}},
+        market_label="Good",
+        market_score=7.8,
+    )
+
+    assert "No fresh exact-confirmed deal found." in report
+    assert "No current deals." not in report
+
+
+def test_weekly_report_handles_unknown_market_score() -> None:
+    report = build_weekly_report(
+        {"one_week": {}, "two_week": {}, "one_month": {}},
+        market_label="Not enough 90-day exact-search history",
+        market_score=None,
+    )
+
+    assert "Market: Not enough 90-day exact-search history" in report
+    assert "/10" not in report.split("Market:", maxsplit=1)[1]
 
 
 def test_strong_alert_has_button_url_and_escaped_fields() -> None:
     alert = build_strong_alert(make_deal(score=9.2), alert_type="best_value")
 
-    assert "Best-Value YYZ &rarr; JED Deal" in alert.text
+    assert "Best Overall YYZ &rarr; JED Deal" in alert.text
     assert "Saudia &amp; Partners" in alert.text
     assert alert.button_text == "View Deal"
     assert alert.button_url == "https://example.com/search?a=1&b=2"

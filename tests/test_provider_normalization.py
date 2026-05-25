@@ -1,8 +1,10 @@
-from datetime import datetime
+from datetime import date, datetime
+from enum import Enum
 from types import SimpleNamespace
 
 from app.config import Settings
-from app.providers.fli_provider import FliProvider
+from app.providers.base import ExactSearchMode
+from app.providers.fli_provider import FliProvider, _fli_sort_by
 
 
 def test_fli_date_price_normalization_handles_calendar_result() -> None:
@@ -53,3 +55,50 @@ def test_fli_exact_result_normalization_uses_available_fields_without_crashing()
     assert deal.stops == 1
     assert deal.total_travel_minutes == 1120
     assert deal.layover_summary is None
+
+
+def test_fli_exact_sort_mode_maps_to_provider_enum() -> None:
+    class SortByStub(Enum):
+        CHEAPEST = "cheapest-sort"
+        TOP_FLIGHTS = "top-flights-sort"
+
+    assert _fli_sort_by(SortByStub, ExactSearchMode.CHEAPEST) == SortByStub.CHEAPEST
+    assert _fli_sort_by(SortByStub, ExactSearchMode.TOP_FLIGHTS) == SortByStub.TOP_FLIGHTS
+
+
+def test_fli_exact_search_returns_ranked_results_with_metadata() -> None:
+    provider = FliProvider(settings=Settings(database_url="postgresql+psycopg://u:p@localhost/db"))
+    raw_results = [
+        SimpleNamespace(
+            legs=[],
+            price=950,
+            currency="CAD",
+            duration=18 * 60,
+            stops=1,
+            layovers=None,
+            primary_airline_name="Saudia",
+        ),
+        SimpleNamespace(
+            legs=[],
+            price=990,
+            currency="CAD",
+            duration=14 * 60,
+            stops=0,
+            layovers=None,
+            primary_airline_name="Saudia",
+        ),
+    ]
+    provider._search_exact = lambda depart, ret, mode, top_n: raw_results
+
+    deals, error = provider._search_fli_exact_deals(
+        date(2026, 9, 12),
+        date(2026, 9, 27),
+        ExactSearchMode.TOP_FLIGHTS,
+        2,
+    )
+
+    assert error is None
+    assert [deal.price_cad for deal in deals] == [950, 990]
+    assert deals[0].metadata["exact_sort_mode"] == "TOP_FLIGHTS"
+    assert deals[0].metadata["exact_rank"] == 1
+    assert deals[1].metadata["exact_rank"] == 2

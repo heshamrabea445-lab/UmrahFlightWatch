@@ -2,6 +2,7 @@ from zoneinfo import ZoneInfo
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
+from apscheduler.triggers.interval import IntervalTrigger
 
 from app.config import Settings
 from app.jobs.cleanup_jobs import CleanupJobService
@@ -19,26 +20,9 @@ def create_scheduler(
     timezone = ZoneInfo(settings.app_timezone)
     scheduler = BackgroundScheduler(timezone=timezone)
     scheduler.add_job(
-        scan_service.scan_category,
-        CronTrigger(day_of_week="mon-sun", hour=9, minute=0, timezone=timezone),
-        args=["one_week"],
-        id="scan_one_week",
-        replace_existing=True,
-        max_instances=1,
-    )
-    scheduler.add_job(
-        scan_service.scan_category,
-        CronTrigger(day_of_week="mon-sun", hour=14, minute=0, timezone=timezone),
-        args=["two_week"],
-        id="scan_two_week",
-        replace_existing=True,
-        max_instances=1,
-    )
-    scheduler.add_job(
-        scan_service.scan_category,
-        CronTrigger(day_of_week="mon-sun", hour=20, minute=0, timezone=timezone),
-        args=["one_month"],
-        id="scan_one_month",
+        scan_service.scan_all_categories,
+        IntervalTrigger(hours=settings.discovery_interval_hours, timezone=timezone),
+        id="discovery_scan",
         replace_existing=True,
         max_instances=1,
     )

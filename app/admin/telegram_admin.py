@@ -171,9 +171,14 @@ class TelegramAdminBot:
             ).scalars()
             lines = ["Current active deals"]
             for row in rows:
+                metadata = row.metadata_json or {}
                 lines.append(
                     f"{row.category}/{row.deal_type}: ${row.price_cad} "
-                    f"{row.depart_date}->{row.return_date} score={row.deal_score}"
+                    f"{row.depart_date}->{row.return_date} score={row.deal_score} "
+                    f"fare={metadata.get('fare_label', 'n/a')} "
+                    f"flight={metadata.get('flight_quality_label', 'n/a')} "
+                    f"sort={metadata.get('exact_sort_mode', 'n/a')} "
+                    f"last_seen={row.last_seen_at}"
                 )
             return "\n".join(lines)
 

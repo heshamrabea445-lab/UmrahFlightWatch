@@ -2,7 +2,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import date
+from enum import StrEnum
 from typing import Any, Protocol
+
+
+class ExactSearchMode(StrEnum):
+    CHEAPEST = "CHEAPEST"
+    TOP_FLIGHTS = "TOP_FLIGHTS"
 
 
 @dataclass
@@ -71,7 +77,10 @@ class FlightProvider(Protocol):
         self,
         depart_date: date,
         return_date: date,
-    ) -> NormalizedFlightDeal | None:
+        *,
+        mode: ExactSearchMode = ExactSearchMode.CHEAPEST,
+        top_n: int = 1,
+    ) -> list[NormalizedFlightDeal]:
         raise NotImplementedError
 
     def normalize_result(self, raw_result: Any, **kwargs: Any) -> NormalizedFlightDeal:

@@ -8,7 +8,7 @@ from datetime import date, datetime, timedelta
 from typing import Any
 
 from app.config import Settings
-from app.providers.base import NormalizedFlightDeal, ProviderSearchResponse
+from app.providers.base import ExactSearchMode, NormalizedFlightDeal, ProviderSearchResponse
 from app.services.link_builder import DESTINATION, ORIGIN, build_google_flights_link
 from app.utils.dates import category_durations
 from app.utils.formatting import format_minutes
@@ -39,6 +39,7 @@ class FliProvider:
             if index > 0 and self.settings.fli_request_delay_seconds > 0:
                 time.sleep(self.settings.fli_request_delay_seconds)
 
+            duration_started = time.perf_counter()
             result, attempts, error = self._retry_call(
                 lambda duration=duration: self._search_dates_duration(
                     start_date,
@@ -46,16 +47,20 @@ class FliProvider:
                     duration,
                 )
             )
+            duration_seconds = _elapsed_seconds(duration_started)
             request_count += attempts
             if error:
                 failed_count += 1
                 errors.append(f"duration={duration}: {error}")
-                logger.exception(
-                    "fli search_dates failed category=%s duration=%s start_date=%s end_date=%s",
+                logger.error(
+                    "fli search_dates failed category=%s duration=%s start_date=%s "
+                    "end_date=%s duration_seconds=%s error=%s",
                     category,
                     duration,
                     start_date,
                     end_date,
+                    duration_seconds,
+                    error,
                 )
                 continue
 
@@ -74,6 +79,7 @@ class FliProvider:
                     "duration": duration,
                     "start_date": start_date.isoformat(),
                     "end_date": end_date.isoformat(),
+                    "duration_seconds": duration_seconds,
                     "result_count": len(normalized_for_duration),
                     "cheapest_price": cheapest.price_cad if cheapest else None,
                     "cheapest_date_pair": (
@@ -89,11 +95,12 @@ class FliProvider:
             )
             logger.info(
                 "fli category scan category=%s duration=%s start_date=%s end_date=%s "
-                "results=%s cheapest_price=%s cheapest_date_pair=%s",
+                "duration_seconds=%s results=%s cheapest_price=%s cheapest_date_pair=%s",
                 category,
                 duration,
                 start_date,
                 end_date,
+                duration_seconds,
                 len(normalized_for_duration),
                 cheapest.price_cad if cheapest else None,
                 (
@@ -116,36 +123,12 @@ class FliProvider:
         self,
         depart_date: date,
         return_date: date,
-    ) -> NormalizedFlightDeal | None:
-        result, _attempts, error = self._retry_call(
-            lambda: self._search_exact(depart_date, return_date)
-        )
-        if error or not result:
-            logger.warning(
-                "fli exact-date confirmation failed depart_date=%s return_date=%s error=%s",
-                depart_date,
-                return_date,
-                error,
-            )
-            return None
-        for raw in result:
-            try:
-                deal = self.normalize_result(
-                    raw,
-                    depart_date=depart_date,
-                    return_date=return_date,
-                )
-                deal.exact_check_completed = True
-                logger.info(
-                    "fli exact-date confirmation succeeded depart_date=%s return_date=%s price=%s",
-                    depart_date,
-                    return_date,
-                    deal.price_cad,
-                )
-                return deal
-            except ValueError as exc:
-                logger.warning("Skipping fli exact result that cannot normalize: %s", exc)
-        return None
+        *,
+        mode: ExactSearchMode = ExactSearchMode.CHEAPEST,
+        top_n: int = 1,
+    ) -> list[NormalizedFlightDeal]:
+        deals, _error = self._search_fli_exact_deals(depart_date, return_date, mode, top_n)
+        return deals
 
     def normalize_result(self, raw_result: Any, **kwargs: Any) -> NormalizedFlightDeal:
         category = kwargs.get("category", "")
@@ -155,6 +138,54 @@ class FliProvider:
 
     def build_google_flights_link(self, depart_date: date, return_date: date) -> str:
         return build_google_flights_link(depart_date, return_date)
+
+    def _search_fli_exact_deals(
+        self,
+        depart_date: date,
+        return_date: date,
+        mode: ExactSearchMode,
+        top_n: int,
+    ) -> tuple[list[NormalizedFlightDeal], str | None]:
+        result, _attempts, error = self._retry_call(
+            lambda: self._search_exact(depart_date, return_date, mode, top_n)
+        )
+        if error or not result:
+            logger.warning(
+                "fli exact-date confirmation failed depart_date=%s return_date=%s mode=%s error=%s",
+                depart_date,
+                return_date,
+                mode.value,
+                error,
+            )
+            return [], error
+
+        deals: list[NormalizedFlightDeal] = []
+        result_limit = max(1, top_n)
+        for rank, raw in enumerate(result[:result_limit], start=1):
+            try:
+                deal = self.normalize_result(
+                    raw,
+                    depart_date=depart_date,
+                    return_date=return_date,
+                )
+                deal.exact_check_completed = True
+                deal.metadata["exact_sort_mode"] = mode.value
+                deal.metadata["exact_rank"] = rank
+                logger.info(
+                    "fli exact-date confirmation succeeded depart_date=%s return_date=%s "
+                    "mode=%s rank=%s price=%s",
+                    depart_date,
+                    return_date,
+                    mode.value,
+                    rank,
+                    deal.price_cad,
+                )
+                deals.append(deal)
+            except ValueError as exc:
+                logger.warning("Skipping fli exact result that cannot normalize: %s", exc)
+        if not deals:
+            return [], "fli exact result did not include a normalizable fare"
+        return deals, None
 
     def _search_dates_duration(
         self,
@@ -193,16 +224,15 @@ class FliProvider:
             seat_type=SeatType.ECONOMY,
         )
         search = SearchDates()
-        return self._with_timeout(
-            lambda: search.search(
-                filters,
-                currency=self.settings.base_currency,
-                language="en-CA",
-                country="CA",
-            )
-        )
+        return self._with_timeout(lambda: search.search(filters))
 
-    def _search_exact(self, depart_date: date, return_date: date) -> list[Any] | None:
+    def _search_exact(
+        self,
+        depart_date: date,
+        return_date: date,
+        mode: ExactSearchMode,
+        top_n: int,
+    ) -> list[Any] | None:
         from fli.models import (
             Airport,
             FlightSearchFilters,
@@ -230,18 +260,10 @@ class FliProvider:
                 ),
             ],
             seat_type=SeatType.ECONOMY,
-            sort_by=SortBy.CHEAPEST,
+            sort_by=_fli_sort_by(SortBy, mode),
         )
         search = SearchFlights()
-        return self._with_timeout(
-            lambda: search.search(
-                filters,
-                top_n=3,
-                currency=self.settings.base_currency,
-                language="en-CA",
-                country="CA",
-            )
-        )
+        return self._with_timeout(lambda: search.search(filters, top_n=max(1, top_n)))
 
     def _retry_call(self, func: Any) -> tuple[Any, int, str | None]:
         attempts = 0
@@ -324,6 +346,14 @@ class FliProvider:
         if isinstance(raw, dict | list | str | int | float | bool | type(None)):
             return raw
         return repr(raw)
+
+
+def _elapsed_seconds(started_at: float) -> float:
+    return round(time.perf_counter() - started_at, 3)
+
+
+def _fli_sort_by(sort_by_type: Any, mode: ExactSearchMode) -> Any:
+    return sort_by_type[mode.value]
 
 
 def _coerce_date(value: Any) -> date:

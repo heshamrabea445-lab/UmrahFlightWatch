@@ -49,14 +49,34 @@ Version 1 uses only the open-source `flights` / `fli` package. It does not use S
 
 ## Runtime Behavior
 
-- Daily scans use Toronto time:
-  - `09:00` scans 1-week trips.
-  - `14:00` scans 2-week trips.
-  - `20:00` scans 1-month trips.
+- Scheduled scans use Toronto time:
+  - Discovery scans run every hour.
+  - The three trip categories run in parallel by default.
+  - Each category exact-checks the top 10 calendar candidates.
+  - Each candidate is checked with `CHEAPEST` and `TOP_FLIGHTS` exact-search modes.
+  - `TOP_FLIGHTS` results feed the report's Best Overall pick when they stay within the price guard.
+  - Best Overall heavily favors lower total travel time; stop count remains display-only.
+- Set `DISCOVERY_CATEGORY_WORKERS=1` if the flight provider starts throttling.
+- Reports hide active deals older than `REPORT_MAX_DEAL_AGE_HOURS`.
+- Older deals remain in `price_history`, but are not presented as current report fares.
+- Fare labels, market rating, and flash-alert medians use one baseline:
+  `MARKET_BASELINE_DAYS` of cheapest exact-confirmed scan snapshots per category.
+- Fare labels use median-ratio bands against that baseline: Excellent at 85% or less
+  of median, Good at 95% or less, Normal at 106% or less, High at 120% or less.
+- Keep `PRICE_HISTORY_DAYS` at least as large as `MARKET_BASELINE_DAYS`.
+- Exact-search volume is roughly doubled because Cheapest and Best Overall use separate
+  provider-ranked exact searches.
+- Strong alerts are price-first:
+  - With enough 90-day history, a selected exact-confirmed deal alerts at or below
+    `FLASH_ALERT_MEDIAN_RATIO` of the category cheapest-snapshot median.
+  - Without enough 90-day history, alerts are limited to fares at or below
+    `FLASH_ALERT_ABSOLUTE_FALLBACK_CAD`.
+  - Suspicious-price detection is only a safety guard and uses
+    `SUSPICIOUS_PRICE_AVERAGE_RATIO` of the category average.
 - Friday `13:30` posts the weekly report.
 - `/pause` pauses scheduled scans and channel posting; `/resume` restores them.
 - Manual admin commands remain available while paused.
-- Strong alerts require exact-date confirmation from `fli`.
+- Strong alerts require exact-date confirmation from the exact-search providers.
 
 ## Admin Commands
 
