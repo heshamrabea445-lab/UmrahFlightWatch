@@ -83,7 +83,7 @@ def test_deal_score_prefers_much_shorter_trip_when_price_is_reasonable() -> None
         recent_category_average=1200,
     )
     faster_reasonable = rated_deal_score(
-        make_deal(1100, minutes=14 * 60),
+        make_deal(1000, minutes=14 * 60),
         recent_category_average=1200,
     )
 

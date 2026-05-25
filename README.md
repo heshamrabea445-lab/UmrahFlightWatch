@@ -55,7 +55,8 @@ Version 1 uses only the open-source `flights` / `fli` package. It does not use S
   - Each category exact-checks the top 10 calendar candidates.
   - Each candidate is checked with `CHEAPEST` and `TOP_FLIGHTS` exact-search modes.
   - `TOP_FLIGHTS` results feed the report's Best Overall pick when they stay within the price guard.
-  - Best Overall heavily favors lower total travel time; stop count remains display-only.
+  - Best Overall favors lower total travel time while still penalizing expensive fares;
+    stop count remains display-only.
 - Set `DISCOVERY_CATEGORY_WORKERS=1` if the flight provider starts throttling.
 - Reports hide active deals older than `REPORT_MAX_DEAL_AGE_HOURS`.
 - Older deals remain in `price_history`, but are not presented as current report fares.

@@ -3,8 +3,8 @@ from typing import SupportsFloat
 from app.providers.base import NormalizedFlightDeal
 from app.services.market_baseline import PriceBaseline, median_ratio_score_for_price
 
-FARE_SCORE_WEIGHT = 0.25
-FLIGHT_QUALITY_SCORE_WEIGHT = 0.65
+FARE_SCORE_WEIGHT = 0.35
+FLIGHT_QUALITY_SCORE_WEIGHT = 0.55
 CONFIDENCE_SCORE_WEIGHT = 0.10
 DEFAULT_SUSPICIOUS_PRICE_AVERAGE_RATIO = 0.20
 
