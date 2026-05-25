@@ -6,12 +6,12 @@ import json
 import logging
 import time
 from collections.abc import Iterable
-from dataclasses import dataclass
-from datetime import date, timedelta
+from dataclasses import dataclass, field
+from datetime import date, datetime, timedelta
 from typing import Any
 
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, sessionmaker
 
 from app.config import Settings
 from app.db.locks import release_advisory_lock, try_advisory_lock
@@ -24,13 +24,20 @@ from app.services.deal_selection import (
     qualifies_for_strong_alert,
     select_active_deals,
 )
-from app.services.market_baseline import PriceBaseline, build_cheapest_snapshot_baseline
+from app.services.market_baseline import (
+    MIN_HISTORY_ROWS,
+    PriceBaseline,
+    build_cheapest_snapshot_baseline,
+)
 from app.services.provider_usage import record_provider_usage
 from app.services.report_builder import build_strong_alert
 from app.services.telegram_client import TelegramClient
 from app.utils.dates import local_today, next_three_month_window, ordered_categories, utc_now
 
 logger = logging.getLogger(__name__)
+
+PIPELINE_LOCK = "search_pipeline"
+EXACT_SEARCH_TOP_N = 3
 
 
 @dataclass(frozen=True)
@@ -48,11 +55,28 @@ class ExactCheckResult:
     failed_count: int
 
 
+@dataclass(frozen=True)
+class _PendingAlert:
+    category: str
+    deal_type: str
+    text: str
+    button_text: str
+    button_url: str
+    active_deal_id: int
+    price_cad: int
+
+
+@dataclass
+class _CategoryOutcome:
+    result: ScanCategoryResult | None = None
+    alerts: list[_PendingAlert] = field(default_factory=list)
+
+
 class FlightScanService:
     def __init__(
         self,
         *,
-        session_factory: Any,
+        session_factory: sessionmaker[Session],
         provider: FlightProvider,
         telegram_client: TelegramClient,
         dry_run: bool,
@@ -67,20 +91,27 @@ class FlightScanService:
     def scan_all_categories(self, *, today: date | None = None, respect_pause: bool = True) -> None:
         categories = ordered_categories()
         started = time.perf_counter()
-        failures: dict[str, BaseException] = {}
-        results: dict[str, ScanCategoryResult] = {}
-        with self.session_factory() as session:
-            if respect_pause and is_paused(session):
+
+        with self.session_factory() as gate_session:
+            if respect_pause and is_paused(gate_session):
                 logger.info("Skipping discovery because app is paused")
                 return
-            if not try_advisory_lock(session, "search_pipeline"):
+            if not try_advisory_lock(gate_session, PIPELINE_LOCK):
                 logger.info("Skipping discovery because search pipeline lock is held")
                 return
             try:
-                results, failures = self._run_discovery_workers(categories, today=today)
-                self._safe_record_discovery_provider_usage(session, results.values())
+                outcomes, failures = self._run_discovery_workers(categories, today=today)
+                self._safe_record_discovery_provider_usage(
+                    gate_session,
+                    (outcome.result for outcome in outcomes.values() if outcome.result),
+                )
             finally:
-                release_advisory_lock(session, "search_pipeline")
+                release_advisory_lock(gate_session, PIPELINE_LOCK)
+
+        self._send_pending_alerts(
+            alert for outcome in outcomes.values() for alert in outcome.alerts
+        )
+
         total_seconds = _elapsed_seconds(started)
         logger.info(
             "discovery scan finished categories=%s failed_categories=%s total_seconds=%s",
@@ -94,22 +125,50 @@ class FlightScanService:
             )
             raise RuntimeError(f"Discovery scan failed categories: {error_summary}")
 
+    def scan_category(
+        self,
+        category: str,
+        *,
+        today: date | None = None,
+        respect_pause: bool = True,
+    ) -> ScanCategoryResult | None:
+        outcome = _CategoryOutcome()
+        with self.session_factory() as session:
+            if respect_pause and is_paused(session):
+                logger.info("Skipping scan because app is paused category=%s", category)
+                return None
+            if not try_advisory_lock(session, PIPELINE_LOCK):
+                logger.info(
+                    "Skipping scan because search pipeline lock is held category=%s",
+                    category,
+                )
+                return None
+            try:
+                outcome = self._scan_category_in_new_session(category, today=today)
+                if outcome.result is not None:
+                    self._safe_record_discovery_provider_usage(session, [outcome.result])
+            finally:
+                release_advisory_lock(session, PIPELINE_LOCK)
+
+        self._send_pending_alerts(outcome.alerts)
+        return outcome.result
+
     def _run_discovery_workers(
         self,
         categories: list[str],
         *,
         today: date | None,
-    ) -> tuple[dict[str, ScanCategoryResult], dict[str, BaseException]]:
+    ) -> tuple[dict[str, _CategoryOutcome], dict[str, BaseException]]:
         worker_count = max(
             1,
             min(self.settings.discovery_category_workers, len(categories)),
         )
-        results: dict[str, ScanCategoryResult] = {}
+        outcomes: dict[str, _CategoryOutcome] = {}
         failures: dict[str, BaseException] = {}
         with concurrent.futures.ThreadPoolExecutor(max_workers=worker_count) as executor:
             future_by_category = {
                 executor.submit(
-                    self._scan_category_worker,
+                    self._scan_category_in_new_session,
                     category,
                     today=today,
                 ): category
@@ -118,69 +177,20 @@ class FlightScanService:
             for future in concurrent.futures.as_completed(future_by_category):
                 category = future_by_category[future]
                 try:
-                    result = future.result()
-                    if result is not None:
-                        results[category] = result
+                    outcomes[category] = future.result()
                 except Exception as exc:  # noqa: BLE001 - collect category failures after join.
                     failures[category] = exc
                     logger.exception("Discovery category worker failed category=%s", category)
-        return results, failures
+        return outcomes, failures
 
-    def _scan_category_worker(
+    def _scan_category_in_new_session(
         self,
         category: str,
         *,
         today: date | None,
-    ) -> ScanCategoryResult | None:
+    ) -> _CategoryOutcome:
         with self.session_factory() as session:
-            lock_name = f"scan:{category}"
-            if not try_advisory_lock(session, lock_name):
-                logger.info(
-                    "Skipping discovery because category lock is held category=%s", category
-                )
-                return None
-            try:
-                return self._scan_category_with_session(
-                    session,
-                    category,
-                    today=today,
-                    respect_pause=False,
-                )
-            finally:
-                release_advisory_lock(session, lock_name)
-
-    def scan_category(
-        self,
-        category: str,
-        *,
-        today: date | None = None,
-        respect_pause: bool = True,
-    ) -> ScanCategoryResult | None:
-        with self.session_factory() as session:
-            if not try_advisory_lock(session, "search_pipeline"):
-                logger.info(
-                    "Skipping scan because search pipeline lock is held category=%s",
-                    category,
-                )
-                return None
-            lock_name = f"scan:{category}"
-            if not try_advisory_lock(session, lock_name):
-                logger.info("Skipping scan because advisory lock is held category=%s", category)
-                release_advisory_lock(session, "search_pipeline")
-                return None
-            try:
-                result = self._scan_category_with_session(
-                    session,
-                    category,
-                    today=today,
-                    respect_pause=respect_pause,
-                )
-                if result is not None:
-                    self._safe_record_discovery_provider_usage(session, [result])
-                return result
-            finally:
-                release_advisory_lock(session, lock_name)
-                release_advisory_lock(session, "search_pipeline")
+            return self._scan_category(session, category, today=today)
 
     def _safe_record_discovery_provider_usage(
         self,
@@ -214,24 +224,15 @@ class FlightScanService:
         )
 
     def _exact_search_modes(self) -> list[ExactSearchMode]:
-        modes = [ExactSearchMode.CHEAPEST]
-        best_mode = ExactSearchMode(self.settings.best_value_exact_sort.upper())
-        if best_mode not in modes:
-            modes.append(best_mode)
-        return modes
+        return [ExactSearchMode.CHEAPEST, ExactSearchMode.TOP_FLIGHTS]
 
-    def _scan_category_with_session(
+    def _scan_category(
         self,
         session: Session,
         category: str,
         *,
         today: date | None,
-        respect_pause: bool,
-    ) -> ScanCategoryResult | None:
-        if respect_pause and is_paused(session):
-            logger.info("Skipping scheduled scan because app is paused category=%s", category)
-            return None
-
+    ) -> _CategoryOutcome:
         category_started = time.perf_counter()
         current_day = today or local_today(self.settings.app_timezone)
         start_date, end_date = next_three_month_window(current_day)
@@ -245,7 +246,6 @@ class FlightScanService:
             metadata_json={"start_date": start_date.isoformat(), "end_date": end_date.isoformat()},
         )
         session.add(scan)
-        session.flush()
         session.commit()
 
         try:
@@ -274,9 +274,9 @@ class FlightScanService:
                 )
             fare_baseline = self._category_fare_baseline(session, category, before=now)
             recent_average = fare_baseline.average
-            deals = self._score_deals(response.deals, fare_baseline)
+            scored = self._score_deals(response.deals, fare_baseline)
             candidates = select_discovery_candidates(
-                deals,
+                scored,
                 self.settings.discovery_candidates_per_category,
             )
             exact_started = time.perf_counter()
@@ -284,16 +284,15 @@ class FlightScanService:
             exact_seconds = _elapsed_seconds(exact_started)
             exact_candidates = dedupe_deals(exact_result.deals)
             self._write_price_history(session, exact_candidates, now)
-            selected = select_active_deals(
-                exact_candidates,
-                best_value_exact_sort=self.settings.best_value_exact_sort,
-                best_value_max_price_premium_cad=(self.settings.best_value_max_price_premium_cad),
-                best_value_max_price_premium_ratio=(
-                    self.settings.best_value_max_price_premium_ratio
-                ),
-            )
+            selected = select_active_deals(exact_candidates)
             self._upsert_active_deals(session, category, selected, now)
-            self._post_strong_alerts(session, category, selected, recent_average, now)
+            session.flush()
+            pending_alerts = self._collect_pending_alerts(
+                session,
+                category,
+                selected,
+                recent_average,
+            )
             total_seconds = _elapsed_seconds(category_started)
             scan.metadata_json = {
                 **scan.metadata_json,
@@ -322,24 +321,26 @@ class FlightScanService:
                 len(candidates),
                 exact_result.successful_count,
             )
-            return ScanCategoryResult(
-                request_count=response.request_count + exact_result.request_count,
-                successful_count=response.successful_count + exact_result.successful_count,
-                failed_count=response.failed_count + exact_result.failed_count,
+            return _CategoryOutcome(
+                result=ScanCategoryResult(
+                    request_count=response.request_count + exact_result.request_count,
+                    successful_count=response.successful_count + exact_result.successful_count,
+                    failed_count=response.failed_count + exact_result.failed_count,
+                ),
+                alerts=pending_alerts,
             )
         except Exception as exc:
             session.rollback()
-            with self.session_factory() as error_session:
-                scan_row = error_session.get(Scan, scan.id)
-                if scan_row:
-                    scan_row.status = "failed"
-                    scan_row.finished_at = utc_now()
-                    scan_row.error_message = str(exc)
-                    scan_row.metadata_json = {
-                        **(scan_row.metadata_json or {}),
-                        "total_seconds": _elapsed_seconds(category_started),
-                    }
-                    error_session.commit()
+            scan_row = session.get(Scan, scan.id)
+            if scan_row is not None:
+                scan_row.status = "failed"
+                scan_row.finished_at = utc_now()
+                scan_row.error_message = str(exc)
+                scan_row.metadata_json = {
+                    **(scan_row.metadata_json or {}),
+                    "total_seconds": _elapsed_seconds(category_started),
+                }
+                session.commit()
             logger.exception("Category scan failed category=%s", category)
             raise
 
@@ -348,80 +349,77 @@ class FlightScanService:
         deals: list[NormalizedFlightDeal],
         fare_baseline: PriceBaseline,
     ) -> list[NormalizedFlightDeal]:
-        scored: list[NormalizedFlightDeal] = []
         for deal in deals:
             apply_deal_ratings(
                 deal,
                 fare_baseline=fare_baseline,
                 recent_category_average=fare_baseline.average,
-                min_history_rows=self.settings.market_min_history_rows,
+                min_history_rows=MIN_HISTORY_ROWS,
             )
-            scored.append(deal)
-        return scored
+        return deals
 
     def _exact_check_candidates(
         self,
         candidates: list[NormalizedFlightDeal],
         fare_baseline: PriceBaseline,
     ) -> ExactCheckResult:
-        exact_candidates: list[NormalizedFlightDeal] = []
-        requests = [
-            (candidate, candidate_rank, mode)
-            for candidate_rank, candidate in enumerate(candidates, start=1)
-            for mode in self._exact_search_modes()
-        ]
+        exact_deals: list[NormalizedFlightDeal] = []
+        modes = self._exact_search_modes()
+        request_count = 0
         successful_count = 0
         failed_count = 0
-        for index, (candidate, candidate_rank, mode) in enumerate(requests):
-            if index > 0 and self.settings.exact_search_delay_seconds > 0:
-                time.sleep(self.settings.exact_search_delay_seconds)
-            try:
-                exact_deals = self.provider.search_exact_round_trip(
-                    candidate.depart_date,
-                    candidate.return_date,
-                    mode=mode,
-                    top_n=self.settings.exact_search_top_n,
-                )
-            except Exception:  # noqa: BLE001 - one exact-date failure should not fail discovery.
-                failed_count += 1
-                logger.exception(
-                    "exact-date confirmation raised category=%s depart_date=%s "
-                    "return_date=%s mode=%s",
+        first_call = True
+        for candidate in candidates:
+            for mode in modes:
+                if not first_call and self.settings.exact_search_delay_seconds > 0:
+                    time.sleep(self.settings.exact_search_delay_seconds)
+                first_call = False
+                request_count += 1
+                try:
+                    found = self.provider.search_exact_round_trip(
+                        candidate.depart_date,
+                        candidate.return_date,
+                        mode=mode,
+                        top_n=EXACT_SEARCH_TOP_N,
+                    )
+                except Exception:  # noqa: BLE001 - one failure must not fail discovery.
+                    failed_count += 1
+                    logger.exception(
+                        "exact-date confirmation raised category=%s depart_date=%s "
+                        "return_date=%s mode=%s",
+                        candidate.category,
+                        candidate.depart_date,
+                        candidate.return_date,
+                        mode.value,
+                    )
+                    continue
+                if found:
+                    successful_count += 1
+                else:
+                    failed_count += 1
+                logger.info(
+                    "exact-date confirmation category=%s depart_date=%s return_date=%s "
+                    "mode=%s succeeded=%s result_count=%s",
                     candidate.category,
                     candidate.depart_date,
                     candidate.return_date,
                     mode.value,
+                    bool(found),
+                    len(found),
                 )
-                continue
-            if exact_deals:
-                successful_count += 1
-            else:
-                failed_count += 1
-            logger.info(
-                "exact-date confirmation category=%s depart_date=%s return_date=%s "
-                "mode=%s succeeded=%s result_count=%s",
-                candidate.category,
-                candidate.depart_date,
-                candidate.return_date,
-                mode.value,
-                bool(exact_deals),
-                len(exact_deals),
-            )
-            for exact in exact_deals:
-                exact.category = candidate.category
-                exact.metadata["calendar_price_cad"] = candidate.price_cad
-                exact.metadata["calendar_candidate_rank"] = candidate_rank
-                exact.metadata.setdefault("exact_sort_mode", mode.value)
-                apply_deal_ratings(
-                    exact,
-                    fare_baseline=fare_baseline,
-                    recent_category_average=fare_baseline.average,
-                    min_history_rows=self.settings.market_min_history_rows,
-                )
-                exact_candidates.append(exact)
+                for exact in found:
+                    exact.category = candidate.category
+                    exact.metadata.setdefault("exact_sort_mode", mode.value)
+                    apply_deal_ratings(
+                        exact,
+                        fare_baseline=fare_baseline,
+                        recent_category_average=fare_baseline.average,
+                        min_history_rows=MIN_HISTORY_ROWS,
+                    )
+                    exact_deals.append(exact)
         return ExactCheckResult(
-            deals=exact_candidates,
-            request_count=len(requests),
+            deals=exact_deals,
+            request_count=request_count,
             successful_count=successful_count,
             failed_count=failed_count,
         )
@@ -430,7 +428,7 @@ class FlightScanService:
         self,
         session: Session,
         deals: list[NormalizedFlightDeal],
-        checked_at: Any,
+        checked_at: datetime,
     ) -> None:
         for deal in deals:
             session.add(_price_history_from_deal(deal, checked_at))
@@ -440,7 +438,7 @@ class FlightScanService:
         session: Session,
         category: str,
         selected: dict[str, NormalizedFlightDeal | None],
-        seen_at: Any,
+        seen_at: datetime,
     ) -> None:
         selected_types = {deal_type for deal_type, deal in selected.items() if deal is not None}
         for stale in session.execute(
@@ -465,16 +463,14 @@ class FlightScanService:
                 continue
             _update_active_deal(existing, deal, seen_at)
 
-    def _post_strong_alerts(
+    def _collect_pending_alerts(
         self,
         session: Session,
         category: str,
         selected: dict[str, NormalizedFlightDeal | None],
         recent_average: float | None,
-        posted_at: Any,
-    ) -> None:
-        if is_paused(session):
-            return
+    ) -> list[_PendingAlert]:
+        pending: list[_PendingAlert] = []
         for deal_type in ("cheapest", "best_value"):
             deal = selected.get(deal_type)
             if deal is None:
@@ -485,43 +481,80 @@ class FlightScanService:
                     ActiveDeal.deal_type == deal_type,
                 )
             ).scalar_one_or_none()
-            last_price = active.last_posted_price_cad if active else None
+            if active is None:
+                continue
             if not qualifies_for_strong_alert(
                 deal,
                 recent_average,
-                last_price,
+                active.last_posted_price_cad,
                 flash_alert_median_ratio=self.settings.flash_alert_median_ratio,
-                flash_alert_absolute_fallback_cad=(self.settings.flash_alert_absolute_fallback_cad),
+                flash_alert_absolute_fallback_cad=self.settings.flash_alert_absolute_fallback_cad,
                 suspicious_price_average_ratio=self.settings.suspicious_price_average_ratio,
             ):
                 continue
             alert = build_strong_alert(deal, alert_type=deal_type)
-            message_id = self.telegram_client.post_strong_alert_sync(
-                alert.text,
-                alert.button_text,
-                alert.button_url,
+            pending.append(
+                _PendingAlert(
+                    category=category,
+                    deal_type=deal_type,
+                    text=alert.text,
+                    button_text=alert.button_text,
+                    button_url=alert.button_url,
+                    active_deal_id=active.id,
+                    price_cad=deal.price_cad,
+                )
             )
-            post = Post(
-                post_type="strong_alert",
-                telegram_message_id=message_id,
-                category=category,
-                active_deal_id=active.id if active else None,
-                content_text=alert.text,
-                posted_at=posted_at,
-                status="dry_run" if self.dry_run else "posted",
-                metadata_json={"deal_type": deal_type},
-            )
-            session.add(post)
-            if active:
-                active.last_posted_at = posted_at
-                active.last_posted_price_cad = deal.price_cad
+        return pending
+
+    def _send_pending_alerts(self, alerts: Iterable[_PendingAlert]) -> None:
+        pending_list = list(alerts)
+        if not pending_list:
+            return
+        sent: list[tuple[_PendingAlert, int | None]] = []
+        for alert in pending_list:
+            try:
+                message_id = self.telegram_client.post_strong_alert(
+                    alert.text,
+                    alert.button_text,
+                    alert.button_url,
+                )
+            except Exception:  # noqa: BLE001 - one failed post must not block the rest.
+                logger.exception(
+                    "Strong alert post failed category=%s deal_type=%s",
+                    alert.category,
+                    alert.deal_type,
+                )
+                continue
+            sent.append((alert, message_id))
+        if not sent:
+            return
+        posted_at = utc_now()
+        with self.session_factory() as session:
+            for alert, message_id in sent:
+                session.add(
+                    Post(
+                        post_type="strong_alert",
+                        telegram_message_id=message_id,
+                        category=alert.category,
+                        active_deal_id=alert.active_deal_id,
+                        content_text=alert.text,
+                        posted_at=posted_at,
+                        status="dry_run" if self.dry_run else "posted",
+                        metadata_json={"deal_type": alert.deal_type},
+                    )
+                )
+                active = session.get(ActiveDeal, alert.active_deal_id)
+                if active is not None:
+                    active.last_posted_at = posted_at
+                    active.last_posted_price_cad = alert.price_cad
+            session.commit()
 
     def _category_fare_baseline(
         self,
         session: Session,
         category: str,
         *,
-        before: Any,
+        before: datetime,
     ) -> PriceBaseline:
         since = utc_now() - timedelta(days=self.settings.market_baseline_days)
         rows = session.execute(
@@ -540,7 +573,7 @@ class FlightScanService:
         )
 
 
-def _price_history_from_deal(deal: NormalizedFlightDeal, checked_at: Any) -> PriceHistory:
+def _price_history_from_deal(deal: NormalizedFlightDeal, checked_at: datetime) -> PriceHistory:
     return PriceHistory(
         source=deal.source,
         category=deal.category,
@@ -558,27 +591,15 @@ def _price_history_from_deal(deal: NormalizedFlightDeal, checked_at: Any) -> Pri
         exact_check_completed=deal.exact_check_completed,
         deal_score=deal.deal_score,
         checked_at=checked_at,
-        metadata_json=deal.metadata,
+        metadata_json=_essential_metadata(deal),
     )
 
 
-def select_discovery_candidates(
-    deals: list[NormalizedFlightDeal],
-    limit: int,
-) -> list[NormalizedFlightDeal]:
-    if limit <= 0:
-        return []
-    best_by_pair: dict[tuple[str, str, date, date, int], NormalizedFlightDeal] = {}
-    for deal in deals:
-        current = best_by_pair.get(deal.date_pair_key())
-        if current is None or deal.price_cad < current.price_cad:
-            best_by_pair[deal.date_pair_key()] = deal
-    return sorted(best_by_pair.values(), key=lambda deal: (deal.price_cad, deal.depart_date))[
-        :limit
-    ]
-
-
-def _active_deal_from_deal(deal: NormalizedFlightDeal, deal_type: str, seen_at: Any) -> ActiveDeal:
+def _active_deal_from_deal(
+    deal: NormalizedFlightDeal,
+    deal_type: str,
+    seen_at: datetime,
+) -> ActiveDeal:
     return ActiveDeal(
         category=deal.category,
         deal_type=deal_type,
@@ -601,11 +622,15 @@ def _active_deal_from_deal(deal: NormalizedFlightDeal, deal_type: str, seen_at: 
         active=True,
         first_seen_at=seen_at,
         last_seen_at=seen_at,
-        metadata_json={**deal.metadata, "deal_type": deal_type},
+        metadata_json={**_essential_metadata(deal), "deal_type": deal_type},
     )
 
 
-def _update_active_deal(row: ActiveDeal, deal: NormalizedFlightDeal, seen_at: Any) -> None:
+def _update_active_deal(
+    row: ActiveDeal,
+    deal: NormalizedFlightDeal,
+    seen_at: datetime,
+) -> None:
     row.origin = deal.origin
     row.destination = deal.destination
     row.depart_date = deal.depart_date
@@ -624,7 +649,36 @@ def _update_active_deal(row: ActiveDeal, deal: NormalizedFlightDeal, seen_at: An
     row.market_label = deal.market_label
     row.active = True
     row.last_seen_at = seen_at
-    row.metadata_json = {**deal.metadata, "deal_type": row.deal_type}
+    row.metadata_json = {**_essential_metadata(deal), "deal_type": row.deal_type}
+
+
+_ESSENTIAL_METADATA_KEYS = (
+    "fare_label",
+    "flight_quality_label",
+    "exact_sort_mode",
+    "baseline_median_cad",
+    "baseline_has_enough_history",
+)
+
+
+def _essential_metadata(deal: NormalizedFlightDeal) -> dict[str, Any]:
+    return {key: deal.metadata[key] for key in _ESSENTIAL_METADATA_KEYS if key in deal.metadata}
+
+
+def select_discovery_candidates(
+    deals: list[NormalizedFlightDeal],
+    limit: int,
+) -> list[NormalizedFlightDeal]:
+    if limit <= 0:
+        return []
+    best_by_pair: dict[tuple[str, str, date, date, int], NormalizedFlightDeal] = {}
+    for deal in deals:
+        current = best_by_pair.get(deal.date_pair_key())
+        if current is None or deal.price_cad < current.price_cad:
+            best_by_pair[deal.date_pair_key()] = deal
+    return sorted(best_by_pair.values(), key=lambda deal: (deal.price_cad, deal.depart_date))[
+        :limit
+    ]
 
 
 def _elapsed_seconds(started_at: float) -> float:

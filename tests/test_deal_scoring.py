@@ -6,10 +6,11 @@ from app.providers.base import NormalizedFlightDeal
 from app.services.deal_scoring import (
     apply_deal_ratings,
     calculate_flight_quality_score,
+    fare_label_for_ratio,
     is_suspicious_price,
-    score_label,
 )
 from app.services.market_baseline import (
+    MIN_HISTORY_ROWS,
     PriceBaseline,
     build_cheapest_snapshot_baseline,
     build_price_baseline,
@@ -51,7 +52,7 @@ def rated_deal_score(
         deal,
         fare_baseline=None,
         recent_category_average=recent_category_average,
-        min_history_rows=20,
+        min_history_rows=MIN_HISTORY_ROWS,
     )
     assert deal.deal_score is not None
     return deal.deal_score
@@ -90,15 +91,15 @@ def test_deal_score_prefers_much_shorter_trip_when_price_is_reasonable() -> None
     assert faster_reasonable > cheap_slow
 
 
-def test_score_label_thresholds_match_product_language() -> None:
-    assert score_label(9.0) == "Excellent"
-    assert score_label(8.5) == "Good"
-    assert score_label(7.0) == "Normal"
-    assert score_label(5.5) == "High"
-    assert score_label(4.9) == "Very High"
+def test_fare_label_thresholds_match_product_language() -> None:
+    assert fare_label_for_ratio(0.80) == "Excellent"
+    assert fare_label_for_ratio(0.90) == "Good"
+    assert fare_label_for_ratio(1.00) == "Normal"
+    assert fare_label_for_ratio(1.10) == "High"
+    assert fare_label_for_ratio(1.30) == "Very High"
 
 
-def test_price_baseline_calculates_percentiles_without_outlier_dominating() -> None:
+def test_price_baseline_stores_only_average_and_median() -> None:
     baseline = build_price_baseline(
         [900, 950, 1000, 1050, 1100, 1150, 1200, 1250, 1300, 3000],
         baseline_days=90,
@@ -106,10 +107,8 @@ def test_price_baseline_calculates_percentiles_without_outlier_dominating() -> N
 
     assert baseline.average == 1290
     assert baseline.median == 1125
-    assert baseline.p10 == 945
-    assert baseline.p25 == 1012.5
-    assert baseline.p75 == 1237.5
-    assert baseline.p90 == 1470
+    assert baseline.sample_size == 10
+    assert baseline.baseline_days == 90
 
 
 def test_cheapest_snapshot_baseline_collapses_multiple_exact_rows_per_scan() -> None:
@@ -136,7 +135,7 @@ def test_cheapest_snapshot_baseline_collapses_multiple_exact_rows_per_scan() -> 
     assert baseline.median == 1350
 
 
-def test_apply_deal_ratings_uses_90_day_baseline_metadata() -> None:
+def test_apply_deal_ratings_writes_essential_metadata() -> None:
     baseline = build_price_baseline(
         [900, 950, 1000, 1050, 1100, 1150, 1200, 1250, 1300, 1350] * 2,
         baseline_days=90,
@@ -147,25 +146,22 @@ def test_apply_deal_ratings_uses_90_day_baseline_metadata() -> None:
         deal,
         fare_baseline=baseline,
         recent_category_average=baseline.average,
-        min_history_rows=20,
+        min_history_rows=MIN_HISTORY_ROWS,
     )
 
     assert deal.metadata["fare_label"] == "Excellent"
     assert deal.metadata["flight_quality_label"] == "Excellent"
-    assert deal.metadata["baseline_sample_size"] == 20
+    assert deal.metadata["baseline_has_enough_history"] is True
+    assert deal.metadata["baseline_median_cad"] == 1125
     assert deal.deal_score and deal.deal_score >= 9
 
 
-def test_fare_rating_uses_median_ratio_bands_not_raw_percentiles() -> None:
+def test_fare_rating_uses_median_ratio_bands() -> None:
     one_week_baseline = PriceBaseline(
         baseline_days=90,
         sample_size=20,
         average=1435,
         median=1440,
-        p10=1412,
-        p25=1412,
-        p75=1440,
-        p90=1490,
     )
     one_week_deal = make_deal(1412)
 
@@ -173,7 +169,7 @@ def test_fare_rating_uses_median_ratio_bands_not_raw_percentiles() -> None:
         one_week_deal,
         fare_baseline=one_week_baseline,
         recent_category_average=one_week_baseline.average,
-        min_history_rows=20,
+        min_history_rows=MIN_HISTORY_ROWS,
     )
 
     assert one_week_deal.metadata["fare_label"] == "Normal"
@@ -185,10 +181,6 @@ def test_fare_rating_treats_small_premium_over_median_as_normal() -> None:
         sample_size=20,
         average=1311,
         median=1290,
-        p10=1290,
-        p25=1290,
-        p75=1290,
-        p90=1362,
     )
     normal_deal = make_deal(1362)
     very_high_deal = make_deal(1590)
@@ -198,7 +190,7 @@ def test_fare_rating_treats_small_premium_over_median_as_normal() -> None:
             deal,
             fare_baseline=two_week_baseline,
             recent_category_average=two_week_baseline.average,
-            min_history_rows=20,
+            min_history_rows=MIN_HISTORY_ROWS,
         )
 
     assert normal_deal.metadata["fare_label"] == "Normal"
@@ -213,11 +205,11 @@ def test_apply_deal_ratings_marks_static_fallback_when_history_is_small() -> Non
         deal,
         fare_baseline=baseline,
         recent_category_average=1200,
-        min_history_rows=20,
+        min_history_rows=MIN_HISTORY_ROWS,
     )
 
-    assert deal.metadata["fare_uses_static_fallback"]
-    assert not deal.metadata["baseline_has_enough_history"]
+    assert deal.metadata["fare_uses_static_fallback"] is True
+    assert deal.metadata["baseline_has_enough_history"] is False
 
 
 def test_flight_quality_scores_bad_layovers_lower() -> None:
@@ -255,7 +247,7 @@ def test_market_rating_uses_historical_snapshots_not_deal_scores() -> None:
         {"two_week": 930},
         {"two_week": [900, 950, 1000, 1050, 1100] * 4},
         baseline_days=90,
-        min_history_rows=20,
+        min_history_rows=MIN_HISTORY_ROWS,
     )
 
     assert rating.label == "Good buying window"
@@ -267,7 +259,7 @@ def test_market_rating_uses_same_median_ratio_bands_as_fare_rating() -> None:
         {"two_week": 1060},
         {"two_week": [900, 950, 1000, 1050, 1100] * 4},
         baseline_days=90,
-        min_history_rows=20,
+        min_history_rows=MIN_HISTORY_ROWS,
     )
 
     assert rating.label == "Normal market"
@@ -279,7 +271,7 @@ def test_market_rating_requires_enough_history() -> None:
         {"two_week": 930},
         {"two_week": [900, 950]},
         baseline_days=90,
-        min_history_rows=20,
+        min_history_rows=MIN_HISTORY_ROWS,
     )
 
     assert rating.label == "Not enough 90-day exact-search history"

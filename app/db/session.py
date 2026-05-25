@@ -1,9 +1,5 @@
-from collections.abc import Generator
-
 from sqlalchemy import Engine, create_engine
 from sqlalchemy.orm import Session, sessionmaker
-
-from app.config import Settings, get_settings
 
 
 def create_db_engine(database_url: str) -> Engine:
@@ -15,12 +11,5 @@ def create_db_engine(database_url: str) -> Engine:
     return create_engine(database_url, pool_pre_ping=True, connect_args=connect_args)
 
 
-def create_session_factory(database_url: str) -> sessionmaker[Session]:
-    return sessionmaker(bind=create_db_engine(database_url), expire_on_commit=False)
-
-
-def get_session() -> Generator[Session, None, None]:
-    settings: Settings = get_settings()
-    factory = create_session_factory(settings.database_url)
-    with factory() as session:
-        yield session
+def create_session_factory(engine: Engine) -> sessionmaker[Session]:
+    return sessionmaker(bind=engine, expire_on_commit=False)

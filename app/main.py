@@ -5,7 +5,7 @@ from fastapi import FastAPI
 
 from app.admin.telegram_admin import TelegramAdminBot
 from app.config import get_settings
-from app.db.session import create_session_factory
+from app.db.session import create_db_engine, create_session_factory
 from app.jobs.cleanup_jobs import CleanupJobService
 from app.jobs.report_jobs import ReportJobService
 from app.jobs.scan_jobs import FlightScanService
@@ -19,7 +19,8 @@ from app.utils.logging import configure_logging
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
     configure_logging(settings.log_level)
-    session_factory = create_session_factory(settings.database_url)
+    engine = create_db_engine(settings.database_url)
+    session_factory = create_session_factory(engine)
     provider = FliProvider(settings=settings)
     telegram_client = TelegramClient(settings=settings)
     scan_service = FlightScanService(
@@ -58,7 +59,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     finally:
         await admin_bot.stop()
         scheduler.shutdown(wait=False)
-        session_factory.kw["bind"].dispose()
+        engine.dispose()
 
 
 def create_app() -> FastAPI:

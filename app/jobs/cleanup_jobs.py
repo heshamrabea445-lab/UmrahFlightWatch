@@ -1,11 +1,16 @@
-from typing import Any
+from sqlalchemy.orm import Session, sessionmaker
 
 from app.config import Settings
 from app.services.cleanup import cleanup_old_data
 
 
 class CleanupJobService:
-    def __init__(self, *, session_factory: Any, settings: Settings) -> None:
+    def __init__(
+        self,
+        *,
+        session_factory: sessionmaker[Session],
+        settings: Settings,
+    ) -> None:
         self.session_factory = session_factory
         self.settings = settings
 

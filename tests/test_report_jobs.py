@@ -9,7 +9,7 @@ from app.jobs.report_jobs import ReportJobService
 
 
 class FakeTelegramClient:
-    def post_weekly_report_sync(self, text: str) -> int | None:
+    def post_weekly_report(self, text: str) -> int | None:
         return None
 
 
@@ -140,7 +140,6 @@ def test_current_report_market_uses_90_day_history_snapshots() -> None:
         settings=Settings(
             database_url="postgresql+psycopg://u:p@localhost/db",
             report_max_deal_age_hours=2,
-            market_min_history_rows=20,
         ),
     )
 
@@ -178,7 +177,6 @@ def test_current_report_market_honors_insufficient_history() -> None:
         settings=Settings(
             database_url="postgresql+psycopg://u:p@localhost/db",
             report_max_deal_age_hours=2,
-            market_min_history_rows=20,
         ),
     )
 

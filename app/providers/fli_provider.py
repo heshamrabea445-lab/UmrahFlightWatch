@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import concurrent.futures
 import logging
 import time
 from dataclasses import asdict, is_dataclass
@@ -221,7 +220,7 @@ class FliProvider:
             seat_type=SeatType.ECONOMY,
         )
         search = SearchDates()
-        return self._with_timeout(lambda: search.search(filters))
+        return search.search(filters)
 
     def _search_exact(
         self,
@@ -260,7 +259,7 @@ class FliProvider:
             sort_by=_fli_sort_by(SortBy, mode),
         )
         search = SearchFlights()
-        return self._with_timeout(lambda: search.search(filters, top_n=max(1, top_n)))
+        return search.search(filters, top_n=max(1, top_n))
 
     def _retry_call(self, func: Any) -> tuple[Any, int, str | None]:
         attempts = 0
@@ -274,11 +273,6 @@ class FliProvider:
                 if attempt < self.settings.fli_max_retries:
                     time.sleep(self.settings.fli_request_delay_seconds)
         return None, attempts, last_error
-
-    def _with_timeout(self, func: Any) -> Any:
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-            future = executor.submit(func)
-            return future.result(timeout=self.settings.fli_timeout_seconds)
 
     def _normalize_date_price(self, raw_result: Any, *, category: str) -> NormalizedFlightDeal:
         dates = getattr(raw_result, "date", None)

@@ -79,6 +79,14 @@ Version 1 uses only the open-source `flights` / `fli` package. It does not use S
 - Manual admin commands remain available while paused.
 - Strong alerts require exact-date confirmation from the exact-search providers.
 
+## Tuning Constants
+
+The following thresholds are intentionally code-level constants, not environment knobs:
+
+- `MIN_HISTORY_ROWS` (20) in `app/services/market_baseline.py`
+- `EXACT_SEARCH_TOP_N` (3) in `app/jobs/scan_jobs.py`
+- `DEFAULT_BEST_VALUE_*` in `app/services/deal_selection.py`
+
 ## Admin Commands
 
 - `/status`

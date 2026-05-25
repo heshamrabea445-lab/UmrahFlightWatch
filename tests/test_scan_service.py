@@ -199,7 +199,7 @@ class FakeTelegramClient:
     def __init__(self) -> None:
         self.strong_alerts: list[str] = []
 
-    def post_strong_alert_sync(self, text: str, button_text: str, button_url: str) -> int | None:
+    def post_strong_alert(self, text: str, button_text: str, button_url: str) -> int | None:
         self.strong_alerts.append(text)
         return None
 
@@ -549,7 +549,7 @@ def test_discovery_exact_checks_configured_top_candidates() -> None:
 
     with session_factory() as session:
         assert session.query(PriceHistory).count() == 20
-        assert session.query(ActiveDeal).filter_by(active=True).count() == 3
+        assert session.query(ActiveDeal).filter_by(active=True).count() == 2
     assert len(provider.exact_calls) == 20
 
 
@@ -576,7 +576,7 @@ def test_scan_all_categories_runs_each_category_with_own_scan_row(tmp_path: Path
         assert {scan.category for scan in scans} == {"one_week", "two_week", "one_month"}
         assert {scan.status for scan in scans} == {"success"}
         assert session.query(PriceHistory).count() == 60
-        assert session.query(ActiveDeal).filter_by(active=True).count() == 9
+        assert session.query(ActiveDeal).filter_by(active=True).count() == 6
         usage = session.query(ProviderUsage).one()
         assert usage.request_count == 63
         for scan in scans:
@@ -615,4 +615,4 @@ def test_scan_all_categories_raises_after_other_categories_finish(tmp_path: Path
         assert scans["two_week"].status == "failed"
         assert scans["one_month"].status == "success"
         assert session.query(PriceHistory).count() == 40
-        assert session.query(ActiveDeal).filter_by(active=True).count() == 6
+        assert session.query(ActiveDeal).filter_by(active=True).count() == 4

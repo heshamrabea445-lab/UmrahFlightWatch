@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from datetime import timedelta
-from typing import Any
+from datetime import datetime, timedelta
 
 from sqlalchemy import select
+from sqlalchemy.orm import Session, sessionmaker
 
 from app.config import Settings
 from app.db.locks import release_advisory_lock, try_advisory_lock
@@ -11,6 +11,8 @@ from app.db.models import ActiveDeal, Post, PriceHistory
 from app.providers.base import NormalizedFlightDeal
 from app.services.app_settings import is_paused
 from app.services.market_baseline import (
+    MIN_HISTORY_ROWS,
+    MarketRating,
     calculate_market_rating,
     cheapest_snapshot_prices_by_category,
 )
@@ -18,12 +20,14 @@ from app.services.report_builder import build_weekly_report
 from app.services.telegram_client import TelegramClient
 from app.utils.dates import ordered_categories, utc_now
 
+WEEKLY_REPORT_LOCK = "weekly_report"
+
 
 class ReportJobService:
     def __init__(
         self,
         *,
-        session_factory: Any,
+        session_factory: sessionmaker[Session],
         telegram_client: TelegramClient,
         settings: Settings,
     ) -> None:
@@ -33,8 +37,7 @@ class ReportJobService:
 
     def post_weekly_report(self, *, respect_pause: bool = True) -> int | None:
         with self.session_factory() as session:
-            lock_name = "weekly_report"
-            if not try_advisory_lock(session, lock_name):
+            if not try_advisory_lock(session, WEEKLY_REPORT_LOCK):
                 return None
             try:
                 if respect_pause and is_paused(session):
@@ -51,7 +54,7 @@ class ReportJobService:
                     feedback_form_url=self.settings.feedback_form_url,
                     generated_at=now,
                 )
-                message_id = self.telegram_client.post_weekly_report_sync(text)
+                message_id = self.telegram_client.post_weekly_report(text)
                 session.add(
                     Post(
                         post_type="weekly_report",
@@ -64,14 +67,13 @@ class ReportJobService:
                         metadata_json={
                             "market_label": market.label,
                             "market_score": market.score,
-                            **market.metadata,
                         },
                     )
                 )
                 session.commit()
                 return message_id
             finally:
-                release_advisory_lock(session, lock_name)
+                release_advisory_lock(session, WEEKLY_REPORT_LOCK)
 
     def build_current_report_text(self) -> str:
         with self.session_factory() as session:
@@ -90,9 +92,9 @@ class ReportJobService:
 
     def _active_deals(
         self,
-        session: Any,
+        session: Session,
         *,
-        fresh_since: Any,
+        fresh_since: datetime,
     ) -> dict[str, dict[str, NormalizedFlightDeal]]:
         output: dict[str, dict[str, NormalizedFlightDeal]] = {
             category: {} for category in ordered_categories()
@@ -111,12 +113,12 @@ class ReportJobService:
 
     def _market_rating(
         self,
-        session: Any,
+        session: Session,
         active: dict[str, dict[str, NormalizedFlightDeal]],
         *,
-        now: Any,
-        fresh_since: Any,
-    ) -> Any:
+        now: datetime,
+        fresh_since: datetime,
+    ) -> MarketRating:
         current_cheapest_prices = {
             category: deals["cheapest"].price_cad
             for category, deals in active.items()
@@ -136,7 +138,7 @@ class ReportJobService:
             current_cheapest_prices,
             snapshot_prices,
             baseline_days=self.settings.market_baseline_days,
-            min_history_rows=self.settings.market_min_history_rows,
+            min_history_rows=MIN_HISTORY_ROWS,
         )
 
 

@@ -1,14 +1,16 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any
 
 from sqlalchemy import desc, select
+from sqlalchemy.orm import Session, sessionmaker
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
 
 from app.config import Settings
 from app.db.models import ActiveDeal, Post, Scan
+from app.jobs.report_jobs import ReportJobService
+from app.jobs.scan_jobs import FlightScanService
 from app.services.app_settings import is_paused, set_setting
 from app.services.provider_usage import current_usage
 from app.utils.dates import month_key, ordered_categories
@@ -23,9 +25,9 @@ class TelegramAdminBot:
         self,
         *,
         settings: Settings,
-        session_factory: Any,
-        scan_service: Any,
-        report_service: Any,
+        session_factory: sessionmaker[Session],
+        scan_service: FlightScanService,
+        report_service: ReportJobService,
     ) -> None:
         self.settings = settings
         self.session_factory = session_factory
