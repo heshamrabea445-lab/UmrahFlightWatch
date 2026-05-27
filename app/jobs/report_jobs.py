@@ -16,7 +16,7 @@ from app.services.market_baseline import (
     calculate_market_rating,
     cheapest_snapshot_prices_by_category,
 )
-from app.services.report_builder import build_weekly_report
+from app.services.report_builder import build_current_deals_message, build_weekly_report
 from app.services.telegram_client import TelegramClient
 from app.utils.dates import ordered_categories, utc_now
 
@@ -53,7 +53,12 @@ class ReportJobService:
                     feedback_form_url=self.settings.feedback_form_url,
                     generated_at=now,
                 )
-                message_id = self.telegram_client.post_weekly_report(text)
+                message_id = self.telegram_client.post_weekly_report(
+                    text,
+                    reply_markup=current_deals_deep_link_markup(
+                        self.settings.telegram_bot_username
+                    ),
+                )
                 session.add(
                     Post(
                         post_type="weekly_report",
@@ -74,19 +79,18 @@ class ReportJobService:
             finally:
                 release_advisory_lock(session, WEEKLY_REPORT_LOCK)
 
-    def build_current_report_text(self) -> str:
+    def build_current_deals_text(self) -> str:
         with self.session_factory() as session:
             now = utc_now()
             fresh_since = now - timedelta(hours=self.settings.report_max_deal_age_hours)
             active = self._active_deals(session, fresh_since=fresh_since)
-            market = self._market_rating(session, active, now=now, fresh_since=fresh_since)
-            return build_weekly_report(
+            return build_current_deals_message(
                 active,
-                market_label=market.label,
-                market_score=market.score,
-                feedback_form_url=self.settings.feedback_form_url,
                 generated_at=now,
             )
+
+    def build_current_report_text(self) -> str:
+        return self.build_current_deals_text()
 
     def _active_deals(
         self,
@@ -162,3 +166,17 @@ def _deal_from_active(row: ActiveDeal) -> NormalizedFlightDeal:
         last_seen_at=row.last_seen_at,
         metadata=row.metadata_json or {},
     )
+
+
+def current_deals_deep_link(username: str) -> str | None:
+    clean_username = username.strip().removeprefix("@")
+    if not clean_username:
+        return None
+    return f"https://t.me/{clean_username}?start=current_deals"
+
+
+def current_deals_deep_link_markup(username: str) -> dict[str, object] | None:
+    link = current_deals_deep_link(username)
+    if link is None:
+        return None
+    return {"inline_keyboard": [[{"text": "Get Latest Deals", "url": link}]]}

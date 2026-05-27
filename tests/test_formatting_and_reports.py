@@ -1,7 +1,11 @@
 from datetime import UTC, date, datetime, timedelta
 
 from app.providers.base import NormalizedFlightDeal
-from app.services.report_builder import build_strong_alert, build_weekly_report
+from app.services.report_builder import (
+    build_current_deals_message,
+    build_strong_alert,
+    build_weekly_report,
+)
 from app.utils.formatting import escape_telegram_html
 
 
@@ -155,6 +159,41 @@ def test_weekly_report_handles_unknown_market_score() -> None:
 
     assert "Market: Not enough market data yet" in report
     assert "/10" not in report.split("Market:", maxsplit=1)[1]
+
+
+def test_current_deals_message_uses_report_layout_without_report_footer() -> None:
+    generated_at = datetime(2026, 5, 23, 20, 0, tzinfo=UTC)
+    cheapest = make_deal(last_seen_at=generated_at - timedelta(minutes=38))
+    best_value = make_deal(
+        deal_type="best_value",
+        price=1020,
+        minutes=16 * 60,
+        last_seen_at=generated_at - timedelta(minutes=38),
+    )
+
+    message = build_current_deals_message(
+        {
+            "one_week": {"cheapest": cheapest, "best_value": best_value},
+            "two_week": {},
+            "one_month": {},
+        },
+        generated_at=generated_at,
+    )
+
+    assert "Latest YYZ &#8594; JED Deals" in message
+    assert "Weekly YYZ" not in message
+    assert "May 23, 2026" not in message
+    assert "Market:" not in message
+    assert "Send Feedback" not in message
+    assert "\U0001f4b8 Cheapest:" in message
+    assert "\u23f1\ufe0f Best Overall:" in message
+    assert "1-Week Trips" in message
+    assert "2-Week Trips" in message
+    assert "1-Month Trips" in message
+    assert "No fresh exact-confirmed deal found." in message
+    assert '<a href="https://example.com/search?a=1&amp;b=2">$890 CAD' in message
+    assert "checked 38 min ago" in message
+    assert "Prices can change" in message
 
 
 def test_strong_alert_has_button_url_and_escaped_fields() -> None:

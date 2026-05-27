@@ -6,6 +6,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     telegram_bot_token: str = Field("", alias="TELEGRAM_BOT_TOKEN")
+    telegram_bot_username: str = Field("", alias="TELEGRAM_BOT_USERNAME")
     telegram_channel_id: str = Field("", alias="TELEGRAM_CHANNEL_ID")
     telegram_admin_chat_id: str = Field("", alias="TELEGRAM_ADMIN_CHAT_ID")
     database_url: str = Field("", alias="DATABASE_URL")
@@ -17,7 +18,7 @@ class Settings(BaseSettings):
     discovery_candidates_per_category: int = Field(10, alias="DISCOVERY_CANDIDATES_PER_CATEGORY")
     discovery_category_workers: int = Field(3, alias="DISCOVERY_CATEGORY_WORKERS")
     discovery_interval_hours: int = Field(1, alias="DISCOVERY_INTERVAL_HOURS")
-    exact_search_delay_seconds: float = Field(0.0, alias="EXACT_SEARCH_DELAY_SECONDS")
+    exact_search_delay_seconds: float = Field(1.0, alias="EXACT_SEARCH_DELAY_SECONDS")
     report_max_deal_age_hours: int = Field(2, alias="REPORT_MAX_DEAL_AGE_HOURS")
     market_baseline_days: int = Field(90, alias="MARKET_BASELINE_DAYS")
     price_history_days: int = Field(90, alias="PRICE_HISTORY_DAYS")

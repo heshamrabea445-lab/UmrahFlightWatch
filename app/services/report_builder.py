@@ -35,21 +35,7 @@ def build_weekly_report(
         _report_date(report_time),
         "",
     ]
-    for category in ordered_categories():
-        lines.append(CATEGORY_LABELS[category])
-        category_deals = active_deals.get(category, {})
-        cheapest = category_deals.get("cheapest")
-        best_value = category_deals.get("best_value")
-        if cheapest and best_value and _same_report_option(cheapest, best_value):
-            lines.append(_deal_line("Cheapest + Best Overall", cheapest, generated_at=report_time))
-        else:
-            if cheapest:
-                lines.append(_deal_line("Cheapest", cheapest, generated_at=report_time))
-            if best_value:
-                lines.append(_deal_line("Best Overall", best_value, generated_at=report_time))
-        if not cheapest and not best_value:
-            lines.append("No fresh exact-confirmed deal found.")
-        lines.append("")
+    _append_deal_sections(lines, active_deals, generated_at=report_time)
 
     if market_score is None:
         lines.append(f"\U0001f4ca Market: {escape_telegram_html(market_label)}")
@@ -58,12 +44,21 @@ def build_weekly_report(
             f"\U0001f4ca Market: {escape_telegram_html(market_label)} -- {market_score:.1f}/10"
         )
     lines.append("")
-    lines.append(
-        "\u26a0\ufe0f Prices can change. Always verify the final price, baggage, "
-        "and layovers before booking."
-    )
+    lines.append(_PRICE_WARNING)
     if feedback_form_url:
         lines.append(html_link(feedback_form_url, "Send Feedback"))
+    return "\n".join(lines).strip()
+
+
+def build_current_deals_message(
+    active_deals: dict[str, dict[str, NormalizedFlightDeal]],
+    *,
+    generated_at: datetime | None = None,
+) -> str:
+    report_time = generated_at or utc_now()
+    lines = ["\U0001f54b Latest YYZ &#8594; JED Deals", ""]
+    _append_deal_sections(lines, active_deals, generated_at=report_time)
+    lines.append(_PRICE_WARNING)
     return "\n".join(lines).strip()
 
 
@@ -116,6 +111,35 @@ def _deal_line(label: str, deal: NormalizedFlightDeal, *, generated_at: datetime
     if freshness:
         parts.append(freshness)
     return " -- ".join(parts)
+
+
+_PRICE_WARNING = (
+    "\u26a0\ufe0f Prices can change. Always verify the final price, baggage, "
+    "and layovers before booking."
+)
+
+
+def _append_deal_sections(
+    lines: list[str],
+    active_deals: dict[str, dict[str, NormalizedFlightDeal]],
+    *,
+    generated_at: datetime,
+) -> None:
+    for category in ordered_categories():
+        lines.append(CATEGORY_LABELS[category])
+        category_deals = active_deals.get(category, {})
+        cheapest = category_deals.get("cheapest")
+        best_value = category_deals.get("best_value")
+        if cheapest and best_value and _same_report_option(cheapest, best_value):
+            lines.append(_deal_line("Cheapest + Best Overall", cheapest, generated_at=generated_at))
+        else:
+            if cheapest:
+                lines.append(_deal_line("Cheapest", cheapest, generated_at=generated_at))
+            if best_value:
+                lines.append(_deal_line("Best Overall", best_value, generated_at=generated_at))
+        if not cheapest and not best_value:
+            lines.append("No fresh exact-confirmed deal found.")
+        lines.append("")
 
 
 def _deal_label(label: str) -> str:

@@ -4,8 +4,8 @@ import asyncio
 
 from sqlalchemy import desc, select
 from sqlalchemy.orm import Session, sessionmaker
-from telegram import Update
-from telegram.ext import Application, CommandHandler, ContextTypes
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes
 
 from app.config import Settings
 from app.db.models import ActiveDeal, Post, Scan
@@ -14,6 +14,8 @@ from app.jobs.scan_jobs import FlightScanService
 from app.services.app_settings import is_paused, set_setting
 from app.services.provider_usage import current_usage
 from app.utils.dates import month_key, ordered_categories
+
+CURRENT_DEALS_CALLBACK = "current_deals"
 
 
 def is_authorized_admin(chat_id: int | None, settings: Settings) -> bool:
@@ -39,6 +41,14 @@ class TelegramAdminBot:
         if not self.settings.telegram_bot_token:
             return
         self.application = Application.builder().token(self.settings.telegram_bot_token).build()
+        self.application.add_handler(CommandHandler("start", self.start_command))
+        self.application.add_handler(CommandHandler("current_deals", self.current_deals))
+        self.application.add_handler(
+            CallbackQueryHandler(
+                self.current_deals_callback,
+                pattern=f"^{CURRENT_DEALS_CALLBACK}$",
+            )
+        )
         for command, handler in {
             "status": self.status,
             "usage": self.usage,
@@ -61,11 +71,53 @@ class TelegramAdminBot:
         await self.application.stop()
         await self.application.shutdown()
 
+    async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        payload = context.args[0] if context.args else ""
+        if payload == CURRENT_DEALS_CALLBACK:
+            await self._send_current_deals(update, context)
+            return
+        if update.effective_message is None:
+            return
+        await update.effective_message.reply_text(
+            "\U0001f54b Welcome to Umrah Flight Watch\n\n"
+            "This bot sends the latest fresh YYZ \u2192 JED deals from the channel.\n\n"
+            "Tap below to get the current deals.",
+            reply_markup=_current_deals_markup("Get Current Deals"),
+        )
+
+    async def current_deals(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        await self._send_current_deals(update, context)
+
+    async def current_deals_callback(
+        self,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE,
+    ) -> None:
+        if update.callback_query is None:
+            return
+        await update.callback_query.answer()
+        await self._send_current_deals(update, context)
+
     async def status(self, update: Update, _context: ContextTypes.DEFAULT_TYPE) -> None:
         if not await self._ensure_admin(update):
             return
         text = await asyncio.to_thread(self._status_text)
         await update.effective_message.reply_text(text)
+
+    async def _send_current_deals(
+        self,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE,
+    ) -> None:
+        if update.effective_chat is None:
+            return
+        text = await asyncio.to_thread(self.report_service.build_current_deals_text)
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text=text,
+            parse_mode="HTML",
+            reply_markup=_current_deals_markup("Refresh Latest Deals"),
+        )
 
     async def usage(self, update: Update, _context: ContextTypes.DEFAULT_TYPE) -> None:
         if not await self._ensure_admin(update):
@@ -203,3 +255,9 @@ class TelegramAdminBot:
                 f"last fli error: {last_error.error_message if last_error else 'none'}\n"
                 f"fli calls this month: {usage.request_count if usage else 0}"
             )
+
+
+def _current_deals_markup(text: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [[InlineKeyboardButton(text, callback_data=CURRENT_DEALS_CALLBACK)]]
+    )

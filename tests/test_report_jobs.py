@@ -9,7 +9,16 @@ from app.jobs.report_jobs import ReportJobService
 
 
 class FakeTelegramClient:
-    def post_weekly_report(self, text: str) -> int | None:
+    def __init__(self) -> None:
+        self.weekly_reply_markups: list[dict[str, object] | None] = []
+
+    def post_weekly_report(
+        self,
+        text: str,
+        *,
+        reply_markup: dict[str, object] | None = None,
+    ) -> int | None:
+        self.weekly_reply_markups.append(reply_markup)
         return None
 
 
@@ -71,7 +80,7 @@ def make_price_history(
     )
 
 
-def test_current_report_hides_stale_active_deals() -> None:
+def test_current_deals_hides_stale_active_deals() -> None:
     engine = create_engine("sqlite+pysqlite:///:memory:")
     Base.metadata.create_all(engine)
     session_factory = sessionmaker(bind=engine)
@@ -103,15 +112,18 @@ def test_current_report_hides_stale_active_deals() -> None:
         ),
     )
 
-    report = service.build_current_report_text()
+    report = service.build_current_deals_text()
 
+    assert "Latest YYZ &#8594; JED Deals" in report
     assert "$900 CAD" in report
     assert "$800 CAD" not in report
     assert "No fresh exact-confirmed deal found." in report
     assert "checked" in report
+    assert "Market:" not in report
+    assert "Send Feedback" not in report
 
 
-def test_current_report_market_uses_90_day_history_snapshots() -> None:
+def test_current_deals_omits_market_even_with_history() -> None:
     engine = create_engine("sqlite+pysqlite:///:memory:")
     Base.metadata.create_all(engine)
     session_factory = sessionmaker(bind=engine)
@@ -143,13 +155,14 @@ def test_current_report_market_uses_90_day_history_snapshots() -> None:
         ),
     )
 
-    report = service.build_current_report_text()
+    report = service.build_current_deals_text()
 
-    assert "Market: Good buying window -- 8.5/10" in report
+    assert "$930 CAD" in report
+    assert "Market:" not in report
     assert "exact-search history" not in report
 
 
-def test_current_report_market_honors_insufficient_history() -> None:
+def test_current_deals_omits_market_when_history_is_insufficient() -> None:
     engine = create_engine("sqlite+pysqlite:///:memory:")
     Base.metadata.create_all(engine)
     session_factory = sessionmaker(bind=engine)
@@ -180,6 +193,53 @@ def test_current_report_market_honors_insufficient_history() -> None:
         ),
     )
 
-    report = service.build_current_report_text()
+    report = service.build_current_deals_text()
 
-    assert "Market: Not enough market data yet" in report
+    assert "$930 CAD" in report
+    assert "Market:" not in report
+
+
+def test_weekly_report_adds_current_deals_button_when_bot_username_is_set() -> None:
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    session_factory = sessionmaker(bind=engine)
+    telegram = FakeTelegramClient()
+    service = ReportJobService(
+        session_factory=session_factory,
+        telegram_client=telegram,
+        settings=Settings(
+            database_url="postgresql+psycopg://u:p@localhost/db",
+            telegram_bot_username="@UmrahFlightWatchBot",
+        ),
+    )
+
+    service.post_weekly_report(respect_pause=False)
+
+    assert telegram.weekly_reply_markups == [
+        {
+            "inline_keyboard": [
+                [
+                    {
+                        "text": "Get Latest Deals",
+                        "url": "https://t.me/UmrahFlightWatchBot?start=current_deals",
+                    }
+                ]
+            ]
+        }
+    ]
+
+
+def test_weekly_report_omits_current_deals_button_when_bot_username_is_blank() -> None:
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    session_factory = sessionmaker(bind=engine)
+    telegram = FakeTelegramClient()
+    service = ReportJobService(
+        session_factory=session_factory,
+        telegram_client=telegram,
+        settings=Settings(database_url="postgresql+psycopg://u:p@localhost/db"),
+    )
+
+    service.post_weekly_report(respect_pause=False)
+
+    assert telegram.weekly_reply_markups == [None]

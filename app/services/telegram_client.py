@@ -20,8 +20,13 @@ class TelegramClient:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
 
-    def post_weekly_report(self, text: str) -> int | None:
-        return self._send_message(text)
+    def post_weekly_report(
+        self,
+        text: str,
+        *,
+        reply_markup: dict[str, Any] | None = None,
+    ) -> int | None:
+        return self._send_message(text, reply_markup=reply_markup)
 
     def post_strong_alert(self, text: str, button_text: str, button_url: str) -> int | None:
         reply_markup = (

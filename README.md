@@ -9,43 +9,44 @@ Version 1 uses only the open-source `flights` / `fli` package. It does not use S
 1. Create a Telegram bot with BotFather.
 2. Add the bot as admin to your Telegram channel.
 3. Get `TELEGRAM_BOT_TOKEN`.
-4. Get `TELEGRAM_CHANNEL_ID` as a public channel username or channel ID.
-5. Get `TELEGRAM_ADMIN_CHAT_ID`.
-6. Create a PostgreSQL database.
-7. Copy the database connection string into `DATABASE_URL`.
-8. Create a feedback form and copy its link.
-9. Copy `.env.example` to `.env`.
-10. Install dependencies:
+4. Get the bot username from BotFather and copy it into `TELEGRAM_BOT_USERNAME`.
+5. Get `TELEGRAM_CHANNEL_ID` as a public channel username or channel ID.
+6. Get `TELEGRAM_ADMIN_CHAT_ID`.
+7. Create a PostgreSQL database.
+8. Copy the database connection string into `DATABASE_URL`.
+9. Create a feedback form and copy its link.
+10. Copy `.env.example` to `.env`.
+11. Install dependencies:
 
    ```powershell
    python -m pip install -e .[dev]
    ```
 
-11. Run Alembic migrations:
+12. Run Alembic migrations:
 
    ```powershell
    python -m alembic upgrade head
    ```
 
-12. Run the app in `DRY_RUN=true`:
+13. Run the app in `DRY_RUN=true`:
 
    ```powershell
    python -m uvicorn app.main:app --reload
    ```
 
-13. In Telegram, run:
+14. In Telegram, run:
 
    ```text
    /scan_now all
    ```
 
-14. Then run:
+15. Then run:
 
    ```text
    /post_report
    ```
 
-15. Set `DRY_RUN=false` only after confirming output looks good.
+16. Set `DRY_RUN=false` only after confirming output looks good.
 
 ## Runtime Behavior
 
@@ -77,6 +78,10 @@ Version 1 uses only the open-source `flights` / `fli` package. It does not use S
 - `/pause` pauses scheduled scans and channel posting; `/resume` restores them.
 - Manual admin commands remain available while paused.
 - Strong alerts require exact-date confirmation from the exact-search providers.
+- Weekly reports include a `Get Latest Deals` button when `TELEGRAM_BOT_USERNAME`
+  is set. The button opens the bot DM with fresh current deals.
+- `/start` and `/current_deals` are public, read-only commands. They never trigger
+  scans or provider calls.
 
 ## Tuning Constants
 
@@ -90,14 +95,25 @@ The following thresholds are intentionally code-level constants, not environment
 
 ## Admin Commands
 
-- `/status`
-- `/usage`
-- `/pause`
-- `/resume`
-- `/scan_now one_week|two_week|one_month|all`
-- `/post_report`
-- `/last_deals`
-- `/provider`
+Public BotFather command list:
+
+```text
+start - Open the bot and get current Umrah flight deals
+current_deals - Show the latest fresh YYZ to JED deals
+```
+
+Private admin commands:
+
+```text
+/status
+/usage
+/pause
+/resume
+/scan_now one_week|two_week|one_month|all
+/post_report
+/last_deals
+/provider
+```
 
 Only `TELEGRAM_ADMIN_CHAT_ID` can use admin commands.
 
