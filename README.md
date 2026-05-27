@@ -1,103 +1,162 @@
 # Umrah Flight Watch
 
-Private codebase for a public YYZ to JED round-trip economy flight-deal Telegram channel.
+Telegram automation for tracking round-trip economy flight deals from Toronto
+Pearson (`YYZ`) to Jeddah (`JED`) for Umrah travel.
 
-Version 1 uses only the open-source `flights` / `fli` package. It does not use SearchAPI, SerpApi, browser automation, cloaked scraping, user accounts, payments, or a dashboard.
+Live channel: [Umrah Flight Watch](https://t.me/UmrahFlightWatch)
 
-## Local Setup
+The bot scans Google Flights data through the open-source `flights` / `fli`
+package, confirms promising date pairs with exact-date searches, and posts
+clear Telegram reports for public subscribers.
+
+## What It Does
+
+- Runs scheduled discovery scans for 1-week, 2-week, and 1-month trip windows.
+- Exact-checks the top calendar candidates before saving/reporting fares.
+- Posts a weekly Telegram report with:
+  - Cheapest exact-confirmed fares.
+  - Best Overall fares, chosen for shorter travel time within a price guard.
+  - Market rating based on recent exact-confirmed fare history.
+  - A `Get Latest Deals` button that opens the bot with current fresh deals.
+- Posts flash alerts when selected exact-confirmed fares are unusually cheap.
+- Lets users request current deals with `/start` or `/current_deals`.
+- Provides private admin commands for manual scans, reports, pause/resume, and
+  provider status.
+
+## Example Report
+
+```text
+🕋 Weekly YYZ → JED Flight Watch
+May 25, 2026
+
+1-Week Trips
+💸 Cheapest: $1,412 CAD -- Jun 11 -> Jun 20 -- 9 days -- 2 stops -- Etihad Airways -- 43h 30m -- fare Normal -- flight Very Poor -- checked 1h ago
+⏱️ Best Overall: $1,490 CAD -- Jun 11 -> Jun 20 -- 9 days -- 2 stops -- Etihad Airways -- 24h 35m -- fare Normal -- flight Poor -- checked 1h ago
+
+📊 Market: Normal market -- 7.0/10
+
+⚠️ Prices can change. Always verify the final price, baggage, and layovers before booking.
+Send Feedback
+```
+
+## Example Current Deals DM
+
+```text
+🕋 Latest YYZ → JED Deals
+
+1-Week Trips
+💸 Cheapest: $1,412 CAD -- Jun 11 -> Jun 20 -- 9 days -- 2 stops -- Etihad Airways -- 43h 30m -- fare Normal -- flight Very Poor -- checked 12 min ago
+⏱️ Best Overall: $1,490 CAD -- Jun 11 -> Jun 20 -- 9 days -- 2 stops -- Etihad Airways -- 24h 35m -- fare Normal -- flight Poor -- checked 12 min ago
+
+2-Week Trips
+No fresh exact-confirmed deal found.
+
+1-Month Trips
+💸⏱️ Cheapest + Best Overall: $1,590 CAD -- May 25 -> Jun 23 -- 29 days -- 2 stops -- Etihad Airways -- 20h 55m -- fare High -- flight Good -- checked 12 min ago
+
+⚠️ Prices can change. Always verify the final price, baggage, and layovers before booking.
+```
+
+Current-deals requests read cached fresh active deals from the database. They do
+not trigger scans or provider calls, and they are rate-limited per chat.
+
+## Example Flash Alert
+
+```text
+🚨 Ultra-Cheap YYZ → JED Deal
+
+Price/Dates: $899 CAD -- Jun 10 -> Jun 17
+Trip length: 7 days
+Stops: 1 stop
+Airline: Saudia
+Total travel time: 17h 40m
+Layover: 3h 10m in JED
+Baggage: Carry-on included
+```
+
+## Tech Stack
+
+- Python 3.12+
+- FastAPI
+- APScheduler
+- SQLAlchemy + Alembic
+- PostgreSQL / Supabase
+- Telegram Bot API
+- Docker
+- `flights` / `fli`
+
+## Setup
 
 1. Create a Telegram bot with BotFather.
-2. Add the bot as admin to your Telegram channel.
-3. Get `TELEGRAM_BOT_TOKEN`.
-4. Get the bot username from BotFather and copy it into `TELEGRAM_BOT_USERNAME`.
-5. Get `TELEGRAM_CHANNEL_ID` as a public channel username or channel ID.
-6. Get `TELEGRAM_ADMIN_CHAT_ID`.
-7. Create a PostgreSQL database.
-8. Copy the database connection string into `DATABASE_URL`.
-9. Create a feedback form and copy its link.
-10. Copy `.env.example` to `.env`.
-11. Install dependencies:
+2. Add the bot as an admin to your Telegram channel.
+3. Create a PostgreSQL database.
+4. Copy the example environment file:
 
-   ```powershell
+   ```bash
+   cp .env.example .env
+   ```
+
+5. Fill in the required values:
+
+   ```env
+   TELEGRAM_BOT_TOKEN=
+   TELEGRAM_BOT_USERNAME=
+   TELEGRAM_CHANNEL_ID=
+   TELEGRAM_ADMIN_CHAT_ID=
+   DATABASE_URL=
+   FEEDBACK_FORM_URL=
+   DRY_RUN=true
+   LOG_LEVEL=INFO
+   ```
+
+6. Install dependencies:
+
+   ```bash
    python -m pip install -e .[dev]
    ```
 
-12. Run Alembic migrations:
+7. Run database migrations:
 
-   ```powershell
+   ```bash
    python -m alembic upgrade head
    ```
 
-13. Run the app in `DRY_RUN=true`:
+8. Start locally:
 
-   ```powershell
+   ```bash
    python -m uvicorn app.main:app --reload
    ```
 
-14. In Telegram, run:
+9. Test from Telegram:
 
    ```text
    /scan_now all
-   ```
-
-15. Then run:
-
-   ```text
    /post_report
+   /current_deals
    ```
 
-16. Set `DRY_RUN=false` only after confirming output looks good.
+Keep `DRY_RUN=true` until the report looks right. Set `DRY_RUN=false` only when
+the bot is ready to post to the public channel.
 
-## Runtime Behavior
+## Docker
 
-- Scheduled scans use Toronto time:
-  - Discovery scans run every hour.
-  - The three trip categories run in parallel by default.
-  - Each category exact-checks the top 10 calendar candidates.
-  - Each candidate is checked with `CHEAPEST` and `TOP_FLIGHTS` exact-search modes.
-  - Best Overall is the fastest exact-confirmed result that stays within the price guard.
-  - Stop count remains display-only.
-- Set `DISCOVERY_CATEGORY_WORKERS=1` if the flight provider starts throttling.
-- Reports hide active deals older than `REPORT_MAX_DEAL_AGE_HOURS`.
-- Older deals remain in `price_history`, but are not presented as current report fares.
-- Fare labels, market rating, and flash-alert medians use one baseline:
-  `MARKET_BASELINE_DAYS` of cheapest exact-confirmed scan snapshots per category.
-- Fare labels use median-ratio bands against that baseline: Excellent at 85% or less
-  of median, Good at 95% or less, Normal at 106% or less, High at 120% or less.
-- Keep `PRICE_HISTORY_DAYS` at least as large as `MARKET_BASELINE_DAYS`.
-- Exact-search volume is roughly doubled because Cheapest and Best Overall use separate
-  provider-ranked exact searches.
-- Strong public channel alerts are price-first:
-  - With enough 90-day history, a selected exact-confirmed deal alerts at or below
-    70% of the category cheapest-snapshot median.
-  - Without enough 90-day history, alerts are limited to fares at or below
-    $750 CAD.
-  - Suspicious-price detection is only a safety guard and uses
-    20% of the category average.
-- Friday `13:30` posts the weekly report.
-- `/pause` pauses scheduled scans and channel posting; `/resume` restores them.
-- Manual admin commands remain available while paused.
-- Strong alerts require exact-date confirmation from the exact-search providers.
-- Weekly reports include a `Get Latest Deals` button when `TELEGRAM_BOT_USERNAME`
-  is set. The button opens the bot DM with fresh current deals.
-- `/start` and `/current_deals` are public, read-only commands. They never trigger
-  scans or provider calls.
-- Current-deals requests read cached fresh active deals from the database and are
-  rate-limited per chat.
+Build and run:
 
-## Tuning Constants
+```bash
+docker build -t umrah-flight-watch .
+docker run --rm --env-file .env umrah-flight-watch python -m alembic upgrade head
+docker run -d --name umrah-flight-watch --restart unless-stopped --env-file .env -p 8000:8000 umrah-flight-watch
+```
 
-The following thresholds are intentionally code-level constants, not environment knobs:
+View logs:
 
-- `MIN_HISTORY_ROWS` (20) in `app/services/market_baseline.py`
-- `EXACT_SEARCH_TOP_N` (3) in `app/jobs/scan_jobs.py`
-- `DEFAULT_BEST_VALUE_*` in `app/services/deal_selection.py`
-- `DEFAULT_FLASH_ALERT_*` in `app/services/deal_selection.py`
-- `DEFAULT_SUSPICIOUS_PRICE_AVERAGE_RATIO` in `app/services/deal_scoring.py`
+```bash
+docker logs -f umrah-flight-watch
+```
 
-## Admin Commands
+## Bot Commands
 
-Public BotFather command list:
+Public BotFather commands:
 
 ```text
 start - Open the bot and get current Umrah flight deals
@@ -117,12 +176,26 @@ Private admin commands:
 /provider
 ```
 
-Only `TELEGRAM_ADMIN_CHAT_ID` can use admin commands.
+Only the configured `TELEGRAM_ADMIN_CHAT_ID` can run admin commands.
+
+## Runtime Notes
+
+- The provider can rate-limit requests, especially from cloud-hosted servers.
+- Flight prices can change quickly and must be verified before booking.
+- Links open Google Flights searches; final fare, baggage, and layovers should
+  always be checked by the user.
+- The bot stores historical fares to improve market ratings over time.
+- Current deals are served from fresh `active_deals`; old fares stay in history
+  but are not presented as current.
 
 ## Verification
 
-```powershell
+```bash
 python -m ruff check .
 python -m ruff format --check .
 python -m pytest
 ```
+
+## License
+
+MIT
