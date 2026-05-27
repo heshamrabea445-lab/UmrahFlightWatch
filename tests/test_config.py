@@ -15,3 +15,22 @@ def test_exact_search_delay_can_be_overridden() -> None:
     )
 
     assert settings.exact_search_delay_seconds == 3.0
+
+
+def test_currency_defaults_are_cad() -> None:
+    settings = Settings(_env_file=None, database_url="postgresql+psycopg://u:p@localhost/db")
+
+    assert settings.fli_default_price_currency == "CAD"
+    assert settings.usd_to_cad_rate == 1.37
+
+
+def test_currency_settings_can_be_overridden() -> None:
+    settings = Settings(
+        _env_file=None,
+        database_url="postgresql+psycopg://u:p@localhost/db",
+        fli_default_price_currency="USD",
+        usd_to_cad_rate=1.41,
+    )
+
+    assert settings.fli_default_price_currency == "USD"
+    assert settings.usd_to_cad_rate == 1.41

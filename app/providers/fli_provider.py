@@ -299,7 +299,11 @@ class FliProvider:
             raise ValueError("fli date search result did not include depart and return dates")
         depart_date = _coerce_date(dates[0])
         return_date = _coerce_date(dates[1])
-        price = _coerce_price(getattr(raw_result, "price", None))
+        price_cad, price_metadata = _price_to_cad(
+            getattr(raw_result, "price", None),
+            getattr(raw_result, "currency", None),
+            settings=self.settings,
+        )
         return NormalizedFlightDeal(
             category=category,
             origin=ORIGIN,
@@ -307,11 +311,11 @@ class FliProvider:
             depart_date=depart_date,
             return_date=return_date,
             trip_length_days=(return_date - depart_date).days,
-            price_cad=price,
+            price_cad=price_cad,
             google_flights_link=self.build_google_flights_link(depart_date, return_date),
             source=self.source,
             metadata={
-                "raw_currency": getattr(raw_result, "currency", None),
+                **price_metadata,
                 "result_type": "dates",
             },
         )
@@ -325,6 +329,11 @@ class FliProvider:
         price = _extract_price(segments)
         if price is None:
             raise ValueError("exact fli result did not include price")
+        price_cad, price_metadata = _price_to_cad(
+            price,
+            _extract_currency(segments),
+            settings=self.settings,
+        )
 
         durations = [getattr(segment, "duration", None) for segment in segments]
         known_durations = [duration for duration in durations if isinstance(duration, int)]
@@ -336,7 +345,7 @@ class FliProvider:
             depart_date=depart_date,
             return_date=return_date,
             trip_length_days=(return_date - depart_date).days,
-            price_cad=_coerce_price(price),
+            price_cad=price_cad,
             airline=_extract_airline(segments),
             stops=stops,
             total_travel_minutes=max(known_durations) if known_durations else None,
@@ -345,7 +354,7 @@ class FliProvider:
             google_flights_link=self.build_google_flights_link(depart_date, return_date),
             source=self.source,
             exact_check_completed=True,
-            metadata={"result_type": "exact"},
+            metadata={**price_metadata, "result_type": "exact"},
         )
 
     def _serialize_raw(self, raw: Any) -> Any:
@@ -376,10 +385,48 @@ def _coerce_date(value: Any) -> date:
     raise ValueError(f"Cannot parse date value: {value!r}")
 
 
-def _coerce_price(value: Any) -> int:
+def _coerce_price_number(value: Any) -> float:
     if value is None:
         raise ValueError("Missing flight price")
-    return int(round(float(value)))
+    return float(value)
+
+
+def _price_to_cad(value: Any, currency: Any, *, settings: Settings) -> tuple[int, dict[str, Any]]:
+    raw_price = _coerce_price_number(value)
+    source_currency = _normalize_currency(
+        currency,
+        default_currency=settings.fli_default_price_currency,
+    )
+    metadata: dict[str, Any] = {
+        "raw_price": _metadata_price(raw_price),
+        "raw_currency": source_currency,
+        "price_currency": "CAD",
+    }
+    if source_currency == "CAD":
+        return int(round(raw_price)), metadata
+    if source_currency == "USD":
+        rate = float(settings.usd_to_cad_rate)
+        if rate <= 0:
+            raise ValueError("USD_TO_CAD_RATE must be greater than 0")
+        metadata["currency_conversion_rate"] = rate
+        return int(round(raw_price * rate)), metadata
+    raise ValueError(f"Unsupported flight price currency: {source_currency}")
+
+
+def _metadata_price(value: float) -> int | float:
+    return int(value) if value.is_integer() else value
+
+
+def _normalize_currency(value: Any, *, default_currency: str) -> str:
+    raw = "" if value is None else str(value).strip().upper()
+    if raw in {"", "$"}:
+        raw = str(default_currency).strip().upper()
+    raw = raw.replace(" ", "")
+    if raw in {"CAD", "C$", "CA$", "CAD$"}:
+        return "CAD"
+    if raw in {"USD", "US$", "USD$"}:
+        return "USD"
+    raise ValueError(f"Unsupported flight price currency: {value!r}")
 
 
 def _extract_price(segments: list[Any]) -> Any:
@@ -387,6 +434,19 @@ def _extract_price(segments: list[Any]) -> Any:
         price = getattr(segment, "price", None)
         if price is not None:
             return price
+    return None
+
+
+def _extract_currency(segments: list[Any]) -> Any:
+    for segment in reversed(segments):
+        if getattr(segment, "price", None) is not None:
+            currency = getattr(segment, "currency", None)
+            if currency:
+                return currency
+    for segment in segments:
+        currency = getattr(segment, "currency", None)
+        if currency:
+            return currency
     return None
 
 

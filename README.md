@@ -113,6 +113,8 @@ Baggage: Carry-on included
    TELEGRAM_ADMIN_CHAT_ID=
    DATABASE_URL=
    FEEDBACK_FORM_URL=
+   FLI_DEFAULT_PRICE_CURRENCY=CAD
+   USD_TO_CAD_RATE=1.37
    DRY_RUN=true
    LOG_LEVEL=INFO
    ```
@@ -195,6 +197,12 @@ Only the configured `TELEGRAM_ADMIN_CHAT_ID` can run admin commands.
 - The bot stores historical fares to improve market ratings over time.
 - Current deals are served from fresh `active_deals`; old fares stay in history
   but are not presented as current.
+- US-hosted EC2 instances may receive provider prices in USD. The bot normalizes
+  provider prices to CAD before saving; set `FLI_DEFAULT_PRICE_CURRENCY=USD`
+  and keep `USD_TO_CAD_RATE` reasonably current if running from a US region.
+- Currency normalization does not retroactively fix old rows. Clear suspect
+  `price_history` and `active_deals` rows if USD prices were previously saved
+  as CAD.
 
 ## Verification
 

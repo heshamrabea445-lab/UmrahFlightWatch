@@ -15,6 +15,8 @@ class Settings(BaseSettings):
     dry_run: bool = Field(True, alias="DRY_RUN")
     fli_request_delay_seconds: float = Field(0.0, alias="FLI_REQUEST_DELAY_SECONDS")
     fli_max_retries: int = Field(0, alias="FLI_MAX_RETRIES")
+    fli_default_price_currency: str = Field("CAD", alias="FLI_DEFAULT_PRICE_CURRENCY")
+    usd_to_cad_rate: float = Field(1.37, alias="USD_TO_CAD_RATE")
     discovery_candidates_per_category: int = Field(10, alias="DISCOVERY_CANDIDATES_PER_CATEGORY")
     discovery_category_workers: int = Field(3, alias="DISCOVERY_CATEGORY_WORKERS")
     discovery_interval_hours: int = Field(1, alias="DISCOVERY_INTERVAL_HOURS")
