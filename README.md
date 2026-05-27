@@ -33,6 +33,14 @@ May 25, 2026
 💸 Cheapest: $1,412 CAD -- Jun 11 -> Jun 20 -- 9 days -- 2 stops -- Etihad Airways -- 43h 30m -- fare Normal -- flight Very Poor -- checked 1h ago
 ⏱️ Best Overall: $1,490 CAD -- Jun 11 -> Jun 20 -- 9 days -- 2 stops -- Etihad Airways -- 24h 35m -- fare Normal -- flight Poor -- checked 1h ago
 
+2-Week Trips
+💸 Cheapest: $1,362 CAD -- Jun 8 -> Jun 22 -- 14 days -- 2 stops -- Etihad Airways -- 43h 30m -- fare Normal -- flight Very Poor -- checked 1h ago
+⏱️ Best Overall: $1,590 CAD -- Jun 8 -> Jun 23 -- 15 days -- 2 stops -- Etihad Airways -- 20h 55m -- fare Very High -- flight Good -- checked 1h ago
+
+1-Month Trips
+💸 Cheapest: $1,362 CAD -- May 26 -> Jun 24 -- 29 days -- 2 stops -- Etihad Airways -- 43h 30m -- fare Normal -- flight Very Poor -- checked 1h ago
+⏱️ Best Overall: $1,590 CAD -- May 25 -> Jun 23 -- 29 days -- 2 stops -- Etihad Airways -- 20h 55m -- fare High -- flight Good -- checked 1h ago
+
 📊 Market: Normal market -- 7.0/10
 
 ⚠️ Prices can change. Always verify the final price, baggage, and layovers before booking.
@@ -83,7 +91,7 @@ Baggage: Carry-on included
 - PostgreSQL / Supabase
 - Telegram Bot API
 - Docker
-- `flights` / `fli`
+- `flights` / `fli` provider package
 
 ## Setup
 
