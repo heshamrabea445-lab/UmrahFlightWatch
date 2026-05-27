@@ -2,7 +2,7 @@
 
 Private codebase for a public YYZ to JED round-trip economy flight-deal Telegram channel.
 
-Version 1 uses only the open-source `flights` / `fli` package. It does not use SearchAPI, SerpApi, browser automation, cloaked scraping, user accounts, payments, private DMs, or a dashboard.
+Version 1 uses only the open-source `flights` / `fli` package. It does not use SearchAPI, SerpApi, browser automation, cloaked scraping, user accounts, payments, or a dashboard.
 
 ## Local Setup
 
@@ -82,6 +82,8 @@ Version 1 uses only the open-source `flights` / `fli` package. It does not use S
   is set. The button opens the bot DM with fresh current deals.
 - `/start` and `/current_deals` are public, read-only commands. They never trigger
   scans or provider calls.
+- Current-deals requests read cached fresh active deals from the database and are
+  rate-limited per chat.
 
 ## Tuning Constants
 

@@ -1,7 +1,11 @@
 import asyncio
 from types import SimpleNamespace
 
-from app.admin.telegram_admin import TelegramAdminBot, is_authorized_admin
+from app.admin.telegram_admin import (
+    CURRENT_DEALS_COOLDOWN_SECONDS,
+    TelegramAdminBot,
+    is_authorized_admin,
+)
 from app.config import Settings
 
 
@@ -43,10 +47,10 @@ class FakeReportService:
 
 class FakeCallbackQuery:
     def __init__(self) -> None:
-        self.answers = 0
+        self.answers: list[str | None] = []
 
-    async def answer(self) -> None:
-        self.answers += 1
+    async def answer(self, text: str | None = None) -> None:
+        self.answers.append(text)
 
 
 def make_bot(report_service: FakeReportService) -> TelegramAdminBot:
@@ -69,9 +73,11 @@ def test_start_command_sends_public_welcome_with_current_deals_button() -> None:
     context = SimpleNamespace(args=[])
 
     asyncio.run(bot.start_command(update, context))
+    asyncio.run(bot.start_command(update, context))
 
     assert report_service.calls == 0
     assert "Welcome to Umrah Flight Watch" in message.replies[0]["text"]
+    assert "Welcome to Umrah Flight Watch" in message.replies[1]["text"]
     keyboard = message.replies[0]["reply_markup"].inline_keyboard
     assert keyboard[0][0].text == "Get Current Deals"
     assert keyboard[0][0].callback_data == "current_deals"
@@ -111,6 +117,41 @@ def test_current_deals_command_sends_current_deals_to_non_admin_user() -> None:
     assert fake_context.bot.messages[0]["chat_id"] == 67890
 
 
+def test_current_deals_command_rate_limits_repeated_requests() -> None:
+    report_service = FakeReportService()
+    bot = make_bot(report_service)
+    fake_context = SimpleNamespace(args=[], bot=FakeBot())
+    update = SimpleNamespace(
+        effective_chat=SimpleNamespace(id=67890),
+        effective_message=FakeMessage(),
+    )
+
+    asyncio.run(bot.current_deals(update, fake_context))
+    asyncio.run(bot.current_deals(update, fake_context))
+
+    assert report_service.calls == 1
+    assert fake_context.bot.messages[1]["chat_id"] == 67890
+    assert fake_context.bot.messages[1]["text"].startswith("Please wait ")
+
+
+def test_current_deals_command_succeeds_after_cooldown() -> None:
+    report_service = FakeReportService()
+    bot = make_bot(report_service)
+    fake_context = SimpleNamespace(args=[], bot=FakeBot())
+    update = SimpleNamespace(
+        effective_chat=SimpleNamespace(id=67890),
+        effective_message=FakeMessage(),
+    )
+
+    asyncio.run(bot.current_deals(update, fake_context))
+    bot._current_deals_last_requested_at[67890] -= CURRENT_DEALS_COOLDOWN_SECONDS + 1
+    asyncio.run(bot.current_deals(update, fake_context))
+
+    assert report_service.calls == 2
+    assert len(fake_context.bot.messages) == 2
+    assert "Latest YYZ" in fake_context.bot.messages[1]["text"]
+
+
 def test_current_deals_callback_answers_and_sends_new_message() -> None:
     report_service = FakeReportService()
     bot = make_bot(report_service)
@@ -124,9 +165,29 @@ def test_current_deals_callback_answers_and_sends_new_message() -> None:
 
     asyncio.run(bot.current_deals_callback(update, fake_context))
 
-    assert callback.answers == 1
+    assert callback.answers == [None]
     assert report_service.calls == 1
     assert fake_context.bot.messages[0]["chat_id"] == 67890
+
+
+def test_current_deals_callback_rate_limits_repeated_requests() -> None:
+    report_service = FakeReportService()
+    bot = make_bot(report_service)
+    callback = FakeCallbackQuery()
+    fake_context = SimpleNamespace(args=[], bot=FakeBot())
+    update = SimpleNamespace(
+        callback_query=callback,
+        effective_chat=SimpleNamespace(id=67890),
+        effective_message=None,
+    )
+
+    asyncio.run(bot.current_deals_callback(update, fake_context))
+    asyncio.run(bot.current_deals_callback(update, fake_context))
+
+    assert report_service.calls == 1
+    assert len(fake_context.bot.messages) == 1
+    assert callback.answers[0] is None
+    assert callback.answers[1].startswith("Please wait ")
 
 
 def test_admin_commands_remain_admin_only_for_non_admin_user() -> None:

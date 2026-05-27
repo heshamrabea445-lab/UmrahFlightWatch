@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import math
+import time
 
 from sqlalchemy import desc, select
 from sqlalchemy.orm import Session, sessionmaker
@@ -16,6 +18,7 @@ from app.services.provider_usage import current_usage
 from app.utils.dates import month_key, ordered_categories
 
 CURRENT_DEALS_CALLBACK = "current_deals"
+CURRENT_DEALS_COOLDOWN_SECONDS = 30
 
 
 def is_authorized_admin(chat_id: int | None, settings: Settings) -> bool:
@@ -36,6 +39,7 @@ class TelegramAdminBot:
         self.scan_service = scan_service
         self.report_service = report_service
         self.application: Application | None = None
+        self._current_deals_last_requested_at: dict[int, float] = {}
 
     async def start(self) -> None:
         if not self.settings.telegram_bot_token:
@@ -95,8 +99,15 @@ class TelegramAdminBot:
     ) -> None:
         if update.callback_query is None:
             return
+        if update.effective_chat is None:
+            await update.callback_query.answer()
+            return
+        wait_seconds = self._current_deals_wait_seconds(update.effective_chat.id)
+        if wait_seconds is not None:
+            await update.callback_query.answer(_cooldown_message(wait_seconds))
+            return
         await update.callback_query.answer()
-        await self._send_current_deals(update, context)
+        await self._send_current_deals(update, context, rate_limit=False)
 
     async def status(self, update: Update, _context: ContextTypes.DEFAULT_TYPE) -> None:
         if not await self._ensure_admin(update):
@@ -108,9 +119,19 @@ class TelegramAdminBot:
         self,
         update: Update,
         context: ContextTypes.DEFAULT_TYPE,
+        *,
+        rate_limit: bool = True,
     ) -> None:
         if update.effective_chat is None:
             return
+        if rate_limit:
+            wait_seconds = self._current_deals_wait_seconds(update.effective_chat.id)
+            if wait_seconds is not None:
+                await context.bot.send_message(
+                    chat_id=update.effective_chat.id,
+                    text=_cooldown_message(wait_seconds),
+                )
+                return
         text = await asyncio.to_thread(self.report_service.build_current_deals_text)
         await context.bot.send_message(
             chat_id=update.effective_chat.id,
@@ -256,8 +277,22 @@ class TelegramAdminBot:
                 f"fli calls this month: {usage.request_count if usage else 0}"
             )
 
+    def _current_deals_wait_seconds(self, chat_id: int) -> int | None:
+        now = time.monotonic()
+        last_requested_at = self._current_deals_last_requested_at.get(chat_id)
+        if last_requested_at is not None:
+            remaining = CURRENT_DEALS_COOLDOWN_SECONDS - (now - last_requested_at)
+            if remaining > 0:
+                return max(1, math.ceil(remaining))
+        self._current_deals_last_requested_at[chat_id] = now
+        return None
+
 
 def _current_deals_markup(text: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [[InlineKeyboardButton(text, callback_data=CURRENT_DEALS_CALLBACK)]]
     )
+
+
+def _cooldown_message(wait_seconds: int) -> str:
+    return f"Please wait {wait_seconds} seconds before refreshing latest deals again."

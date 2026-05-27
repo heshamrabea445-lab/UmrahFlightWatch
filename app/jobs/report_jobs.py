@@ -89,9 +89,6 @@ class ReportJobService:
                 generated_at=now,
             )
 
-    def build_current_report_text(self) -> str:
-        return self.build_current_deals_text()
-
     def _active_deals(
         self,
         session: Session,

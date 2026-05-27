@@ -107,6 +107,7 @@ def test_current_deals_hides_stale_active_deals() -> None:
         session_factory=session_factory,
         telegram_client=FakeTelegramClient(),
         settings=Settings(
+            _env_file=None,
             database_url="postgresql+psycopg://u:p@localhost/db",
             report_max_deal_age_hours=2,
         ),
@@ -150,6 +151,7 @@ def test_current_deals_omits_market_even_with_history() -> None:
         session_factory=session_factory,
         telegram_client=FakeTelegramClient(),
         settings=Settings(
+            _env_file=None,
             database_url="postgresql+psycopg://u:p@localhost/db",
             report_max_deal_age_hours=2,
         ),
@@ -188,6 +190,7 @@ def test_current_deals_omits_market_when_history_is_insufficient() -> None:
         session_factory=session_factory,
         telegram_client=FakeTelegramClient(),
         settings=Settings(
+            _env_file=None,
             database_url="postgresql+psycopg://u:p@localhost/db",
             report_max_deal_age_hours=2,
         ),
@@ -208,6 +211,7 @@ def test_weekly_report_adds_current_deals_button_when_bot_username_is_set() -> N
         session_factory=session_factory,
         telegram_client=telegram,
         settings=Settings(
+            _env_file=None,
             database_url="postgresql+psycopg://u:p@localhost/db",
             telegram_bot_username="@UmrahFlightWatchBot",
         ),
@@ -237,7 +241,7 @@ def test_weekly_report_omits_current_deals_button_when_bot_username_is_blank() -
     service = ReportJobService(
         session_factory=session_factory,
         telegram_client=telegram,
-        settings=Settings(database_url="postgresql+psycopg://u:p@localhost/db"),
+        settings=Settings(_env_file=None, database_url="postgresql+psycopg://u:p@localhost/db"),
     )
 
     service.post_weekly_report(respect_pause=False)
