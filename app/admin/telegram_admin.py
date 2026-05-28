@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import math
 import time
 
@@ -19,6 +20,8 @@ from app.utils.dates import month_key, ordered_categories
 
 CURRENT_DEALS_CALLBACK = "current_deals"
 CURRENT_DEALS_COOLDOWN_SECONDS = 30
+
+logger = logging.getLogger(__name__)
 
 
 def is_authorized_admin(chat_id: int | None, settings: Settings) -> bool:
@@ -40,6 +43,7 @@ class TelegramAdminBot:
         self.report_service = report_service
         self.application: Application | None = None
         self._current_deals_last_requested_at: dict[int, float] = {}
+        self._manual_scan_task: asyncio.Task[None] | None = None
 
     async def start(self) -> None:
         if not self.settings.telegram_bot_token:
@@ -165,6 +169,9 @@ class TelegramAdminBot:
     async def scan_now(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not await self._ensure_admin(update):
             return
+        if self._manual_scan_task is not None and not self._manual_scan_task.done():
+            await update.effective_message.reply_text("Manual scan already running.")
+            return
         category = context.args[0] if context.args else "all"
         if category not in {*ordered_categories(), "all"}:
             await update.effective_message.reply_text(
@@ -172,11 +179,42 @@ class TelegramAdminBot:
             )
             return
         await update.effective_message.reply_text(f"Starting manual scan: {category}")
-        if category == "all":
-            await asyncio.to_thread(self.scan_service.scan_all_categories, respect_pause=False)
+        chat_id = update.effective_chat.id if update.effective_chat else None
+        if chat_id is None:
+            return
+        self._manual_scan_task = asyncio.create_task(
+            self._run_manual_scan(category, chat_id, context)
+        )
+
+    async def _run_manual_scan(
+        self,
+        category: str,
+        chat_id: int,
+        context: ContextTypes.DEFAULT_TYPE,
+    ) -> None:
+        try:
+            if category == "all":
+                await asyncio.to_thread(self.scan_service.scan_all_categories, respect_pause=False)
+            else:
+                await asyncio.to_thread(
+                    self.scan_service.scan_category,
+                    category,
+                    respect_pause=False,
+                )
+        except Exception as exc:
+            logger.exception("Manual scan failed category=%s", category)
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text=f"Manual scan failed: {category}\n{exc}",
+            )
         else:
-            await asyncio.to_thread(self.scan_service.scan_category, category, respect_pause=False)
-        await update.effective_message.reply_text(f"Manual scan finished: {category}")
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text=f"Manual scan finished: {category}",
+            )
+        finally:
+            if self._manual_scan_task is asyncio.current_task():
+                self._manual_scan_task = None
 
     async def post_report(self, update: Update, _context: ContextTypes.DEFAULT_TYPE) -> None:
         if not await self._ensure_admin(update):
