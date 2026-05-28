@@ -234,7 +234,7 @@ class FlightScanService:
         today: date | None,
     ) -> _CategoryOutcome:
         category_started = time.perf_counter()
-        current_day = today or local_today(self.settings.app_timezone)
+        current_day = today or _provider_safe_scan_day(local_today(self.settings.app_timezone))
         start_date, end_date = next_three_month_window(current_day)
         now = utc_now()
         scan = Scan(
@@ -680,6 +680,10 @@ def select_discovery_candidates(
 
 def _elapsed_seconds(started_at: float) -> float:
     return round(time.perf_counter() - started_at, 3)
+
+
+def _provider_safe_scan_day(local_day: date, provider_day: date | None = None) -> date:
+    return max(local_day, provider_day or date.today())
 
 
 def _request_hash(raw: dict[str, Any]) -> str:

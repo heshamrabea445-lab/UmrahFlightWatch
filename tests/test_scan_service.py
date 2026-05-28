@@ -8,7 +8,11 @@ from sqlalchemy.orm import sessionmaker
 
 from app.config import Settings
 from app.db.models import ActiveDeal, Base, PriceHistory, ProviderUsage, Scan
-from app.jobs.scan_jobs import FlightScanService, select_discovery_candidates
+from app.jobs.scan_jobs import (
+    FlightScanService,
+    _provider_safe_scan_day,
+    select_discovery_candidates,
+)
 from app.providers.base import ExactSearchMode, NormalizedFlightDeal, ProviderSearchResponse
 
 
@@ -65,6 +69,20 @@ class FakeProvider:
                 metadata={"exact_sort_mode": mode.value, "exact_rank": 1},
             )
         ]
+
+
+def test_provider_safe_scan_day_uses_provider_day_when_local_day_is_behind() -> None:
+    assert _provider_safe_scan_day(
+        date(2026, 5, 27),
+        provider_day=date(2026, 5, 28),
+    ) == date(2026, 5, 28)
+
+
+def test_provider_safe_scan_day_keeps_later_local_day() -> None:
+    assert _provider_safe_scan_day(
+        date(2026, 5, 29),
+        provider_day=date(2026, 5, 28),
+    ) == date(2026, 5, 29)
 
 
 class ExactPriceProvider(FakeProvider):
