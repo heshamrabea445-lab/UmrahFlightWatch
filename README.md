@@ -114,6 +114,7 @@ Baggage: Carry-on included
    DATABASE_URL=
    FEEDBACK_FORM_URL=
    FLI_DEFAULT_PRICE_CURRENCY=CAD
+   FLI_CALL_TIMEOUT_SECONDS=90
    USD_TO_CAD_RATE=1.37
    DRY_RUN=true
    LOG_LEVEL=INFO
@@ -191,6 +192,8 @@ Only the configured `TELEGRAM_ADMIN_CHAT_ID` can run admin commands.
 ## Runtime Notes
 
 - The provider can rate-limit requests, especially from cloud-hosted servers.
+- Slow or stuck provider calls are capped by `FLI_CALL_TIMEOUT_SECONDS` so one
+  stalled request does not freeze the hourly pipeline.
 - Flight prices can change quickly and must be verified before booking.
 - Links open Google Flights searches; final fare, baggage, and layovers should
   always be checked by the user.

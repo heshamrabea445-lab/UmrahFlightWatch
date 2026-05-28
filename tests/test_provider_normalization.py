@@ -1,9 +1,11 @@
+import time
 from datetime import date, datetime
 from enum import Enum
 from types import SimpleNamespace
 
 import pytest
 
+import app.providers.fli_provider as fli_provider
 from app.config import Settings
 from app.providers.base import ExactSearchMode
 from app.providers.fli_provider import FliProvider, _fli_sort_by
@@ -243,3 +245,78 @@ def test_fli_exact_search_returns_ranked_results_with_metadata() -> None:
     assert deals[0].metadata["exact_sort_mode"] == "TOP_FLIGHTS"
     assert deals[0].metadata["exact_rank"] == 1
     assert deals[1].metadata["exact_rank"] == 2
+
+
+def test_fli_retry_call_returns_fast_result_before_timeout() -> None:
+    provider = FliProvider(
+        settings=Settings(
+            _env_file=None,
+            database_url="postgresql+psycopg://u:p@localhost/db",
+            fli_call_timeout_seconds=1.0,
+        )
+    )
+
+    result, attempts, error = provider._retry_call(lambda: "ok")
+
+    assert result == "ok"
+    assert attempts == 1
+    assert error is None
+
+
+def test_fli_retry_call_times_out_slow_provider_call() -> None:
+    provider = FliProvider(
+        settings=Settings(
+            _env_file=None,
+            database_url="postgresql+psycopg://u:p@localhost/db",
+            fli_call_timeout_seconds=0.01,
+        )
+    )
+
+    result, attempts, error = provider._retry_call(lambda: time.sleep(0.05))
+
+    assert result is None
+    assert attempts == 1
+    assert error == "fli provider call timed out after 0.01 seconds"
+
+
+def test_fli_calendar_timeout_counts_as_failed_request(monkeypatch: pytest.MonkeyPatch) -> None:
+    provider = FliProvider(
+        settings=Settings(
+            _env_file=None,
+            database_url="postgresql+psycopg://u:p@localhost/db",
+            fli_call_timeout_seconds=0.01,
+        )
+    )
+    monkeypatch.setattr(fli_provider, "category_durations", lambda category: [7])
+    provider._search_dates_duration = lambda start_date, end_date, duration: time.sleep(0.05)
+
+    response = provider.search_dates_for_category(
+        "one_week",
+        date(2026, 9, 1),
+        date(2026, 12, 1),
+    )
+
+    assert response.deals == []
+    assert response.request_count == 1
+    assert response.successful_count == 0
+    assert response.failed_count == 1
+
+
+def test_fli_exact_timeout_returns_empty_results() -> None:
+    provider = FliProvider(
+        settings=Settings(
+            _env_file=None,
+            database_url="postgresql+psycopg://u:p@localhost/db",
+            fli_call_timeout_seconds=0.01,
+        )
+    )
+    provider._search_exact = lambda depart, ret, mode, top_n: time.sleep(0.05)
+
+    deals = provider.search_exact_round_trip(
+        date(2026, 9, 12),
+        date(2026, 9, 27),
+        mode=ExactSearchMode.CHEAPEST,
+        top_n=3,
+    )
+
+    assert deals == []

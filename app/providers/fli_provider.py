@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import concurrent.futures
 import logging
 import time
 from dataclasses import asdict, is_dataclass
@@ -37,6 +38,13 @@ class FliProvider:
             if index > 0 and self.settings.fli_request_delay_seconds > 0:
                 time.sleep(self.settings.fli_request_delay_seconds)
 
+            logger.info(
+                "fli search_dates starting category=%s duration=%s start_date=%s end_date=%s",
+                category,
+                duration,
+                start_date,
+                end_date,
+            )
             duration_started = time.perf_counter()
             result, attempts, error = self._retry_call(
                 lambda duration=duration: self._search_dates_duration(
@@ -161,6 +169,13 @@ class FliProvider:
         mode: ExactSearchMode,
         top_n: int,
     ) -> tuple[list[NormalizedFlightDeal], str | None]:
+        logger.info(
+            "fli exact-date confirmation starting depart_date=%s return_date=%s mode=%s top_n=%s",
+            depart_date,
+            return_date,
+            mode.value,
+            top_n,
+        )
         result, _attempts, error = self._retry_call(
             lambda: self._search_exact(depart_date, return_date, mode, top_n)
         )
@@ -286,12 +301,27 @@ class FliProvider:
         for attempt in range(self.settings.fli_max_retries + 1):
             attempts = attempt + 1
             try:
-                return func(), attempts, None
+                return self._call_with_timeout(func), attempts, None
             except Exception as exc:  # noqa: BLE001 - provider boundary must contain fli errors.
                 last_error = str(exc)
                 if attempt < self.settings.fli_max_retries:
                     time.sleep(self.settings.fli_request_delay_seconds)
         return None, attempts, last_error
+
+    def _call_with_timeout(self, func: Any) -> Any:
+        timeout = self.settings.fli_call_timeout_seconds
+        if timeout <= 0:
+            return func()
+
+        executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+        future = executor.submit(func)
+        try:
+            return future.result(timeout=timeout)
+        except concurrent.futures.TimeoutError as exc:
+            future.cancel()
+            raise TimeoutError(f"fli provider call timed out after {timeout:g} seconds") from exc
+        finally:
+            executor.shutdown(wait=False, cancel_futures=True)
 
     def _normalize_date_price(self, raw_result: Any, *, category: str) -> NormalizedFlightDeal:
         dates = getattr(raw_result, "date", None)
